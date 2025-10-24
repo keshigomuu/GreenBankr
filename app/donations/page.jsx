@@ -1,66 +1,52 @@
-"use client"
+"use client";
 
-import { useState } from "react"
-import { Navigation } from "@/components/navigation"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
-import { Progress } from "@/components/ui/progress"
-import { Heart, TreePine, Droplet, Wind, Users } from "lucide-react"
+import { useEffect, useMemo, useState } from "react";
+import { Navigation } from "@/components/navigation";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Heart, TreePine, Droplet, Wind, Users } from "lucide-react";
+import { ensureCustomerIds, ensureNumericCustomerId } from "@/lib/utils";
+import { useDonationsByCustomer, useAddDonation } from "@/hooks/useDonations";
 
 const organizations = [
-  {
-    id: 1,
-    name: "Ocean Cleanup Initiative",
-    icon: Droplet,
-    description: "Removing plastic from oceans and preventing pollution",
-    raised: 45000,
-    goal: 100000,
-    impact: "2,500 kg of plastic removed",
-    category: "Environment",
-  },
-  {
-    id: 2,
-    name: "Reforestation Project",
-    icon: TreePine,
-    description: "Planting trees to combat climate change",
-    raised: 78000,
-    goal: 100000,
-    impact: "15,000 trees planted",
-    category: "Climate",
-  },
-  {
-    id: 3,
-    name: "Clean Air Campaign",
-    icon: Wind,
-    description: "Reducing air pollution in urban areas",
-    raised: 32000,
-    goal: 75000,
-    impact: "8 cities improved",
-    category: "Environment",
-  },
-  {
-    id: 4,
-    name: "Community Gardens",
-    icon: Users,
-    description: "Building sustainable food sources in communities",
-    raised: 18000,
-    goal: 50000,
-    impact: "25 gardens established",
-    category: "Community",
-  },
-]
-
-const donationHistory = [
-  { id: 1, organization: "Ocean Cleanup Initiative", amount: 5.5, date: "2025-10-20", source: "Rounded" },
-  { id: 2, organization: "Reforestation Project", amount: 25.0, date: "2025-10-15", source: "Manual" },
-  { id: 3, organization: "Clean Air Campaign", amount: 3.25, date: "2025-10-12", source: "Rounded" },
-  { id: 4, organization: "Community Gardens", amount: 10.0, date: "2025-10-08", source: "Manual" },
-]
+  { id: 1, name: "Ocean Cleanup Initiative", icon: Droplet, category: "Environment" },
+  { id: 2, name: "Reforestation Project", icon: TreePine, category: "Climate" },
+  { id: 3, name: "Clean Air Campaign", icon: Wind, category: "Environment" },
+  { id: 4, name: "Community Gardens", icon: Users, category: "Community" },
+];
 
 export default function DonationsPage() {
-  const [selectedOrg, setSelectedOrg] = useState(null)
+  const [customer, setCustomer] = useState({ id: null, intId: null });
 
-  const totalDonated = donationHistory.reduce((sum, donation) => sum + donation.amount, 0)
+  useEffect(() => {
+    setCustomer(ensureCustomerIds()); // { id: "user_xxx", intId: number }
+  }, []);
+
+  // Load donation history using the numeric id
+  const { donations, loading, error, refresh } = useDonationsByCustomer(customer.intId);
+
+  // Donate form
+  const [orgId, setOrgId] = useState("");
+  const [amount, setAmount] = useState("");
+  const { add, loading: adding, error: addError } = useAddDonation();
+
+  const totalDonated = useMemo(
+    () => (Array.isArray(donations) ? donations.reduce((s, d) => s + Number(d.amount || 0), 0) : 0),
+    [donations]
+  );
+
+  const onDonate = async (e) => {
+    e.preventDefault();
+    const numericCustomerId = ensureNumericCustomerId();
+    if (!numericCustomerId || !orgId || !amount) return;
+    await add({ customerId: numericCustomerId, orgId: parseInt(orgId, 10), amount: Number(amount) });
+    setAmount("");
+    setOrgId("");
+    refresh();
+  };
 
   return (
     <div className="min-h-screen bg-background">
@@ -71,7 +57,9 @@ export default function DonationsPage() {
           {/* Header */}
           <div>
             <h1 className="text-3xl font-bold text-foreground">Donations</h1>
-            <p className="text-muted-foreground mt-1">Support causes you care about</p>
+            <p className="text-muted-foreground mt-1">
+              Support causes you care about {customer.intId ? `(ID ${customer.intId})` : ""}
+            </p>
           </div>
 
           {/* Stats */}
@@ -83,34 +71,82 @@ export default function DonationsPage() {
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">${totalDonated.toFixed(2)}</div>
-                <p className="text-xs text-muted-foreground mt-1">Across {donationHistory.length} donations</p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {loading ? "Loading…" : `Across ${donations?.length || 0} donations`}
+                </p>
               </CardContent>
             </Card>
 
             <Card>
               <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">This Month</CardTitle>
+                <CardTitle className="text-sm font-medium text-muted-foreground">Latest Donation</CardTitle>
                 <TreePine className="w-4 h-4 text-primary" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">$43.75</div>
-                <p className="text-xs text-muted-foreground mt-1">4 organizations supported</p>
+                {loading ? (
+                  <div className="text-sm text-muted-foreground">Loading…</div>
+                ) : donations?.length ? (
+                  <>
+                    <div className="text-2xl font-bold">
+                      ${Number(donations[0].amount).toFixed(2)}
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {new Date(donations[0].date || Date.now()).toLocaleDateString()}
+                    </p>
+                  </>
+                ) : (
+                  <div className="text-sm text-muted-foreground">No donations made.</div>
+                )}
               </CardContent>
             </Card>
 
             <Card>
               <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">Carbon Offset</CardTitle>
+                <CardTitle className="text-sm font-medium text-muted-foreground">Give Today</CardTitle>
                 <Wind className="w-4 h-4 text-primary" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">12 kg CO₂</div>
-                <p className="text-xs text-muted-foreground mt-1">Through your donations</p>
+                <form className="space-y-3" onSubmit={onDonate}>
+                  <div className="grid grid-cols-5 gap-2">
+                    <div className="col-span-3">
+                      <Label className="text-xs">Organization</Label>
+                      <Select value={orgId} onValueChange={setOrgId}>
+                        <SelectTrigger><SelectValue placeholder="Choose charity" /></SelectTrigger>
+                        <SelectContent>
+                          {organizations.map((o) => (
+                            <SelectItem key={o.id} value={String(o.id)}>{o.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="col-span-2">
+                      <Label className="text-xs">Amount (SGD)</Label>
+                      <Input
+                        value={amount}
+                        onChange={(e) => setAmount(e.target.value)}
+                        type="number"
+                        step="0.01"
+                        min="0.01"
+                        placeholder="10.00"
+                        required
+                      />
+                    </div>
+                  </div>
+                  <Button type="submit" className="w-full" disabled={adding || !orgId || !amount || !customer.intId}>
+                    <Heart className="w-4 h-4 mr-2" />
+                    {adding ? "Processing..." : "Donate Now"}
+                  </Button>
+                  {addError && (
+                    <p className="text-xs text-red-600">
+                      Failed to donate: {String(addError.message || addError)}
+                    </p>
+                  )}
+                </form>
               </CardContent>
             </Card>
           </div>
 
-          {/* Organizations */}
+          {/* Featured Orgs */}
           <Card>
             <CardHeader>
               <CardTitle>Featured Organizations</CardTitle>
@@ -119,8 +155,7 @@ export default function DonationsPage() {
             <CardContent>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {organizations.map((org) => {
-                  const Icon = org.icon
-                  const progress = (org.raised / org.goal) * 100
+                  const Icon = org.icon;
                   return (
                     <div
                       key={org.id}
@@ -132,30 +167,17 @@ export default function DonationsPage() {
                         </div>
                         <div className="flex-1">
                           <h3 className="font-semibold text-foreground mb-1">{org.name}</h3>
-                          <p className="text-sm text-muted-foreground mb-2">{org.description}</p>
                           <span className="inline-block px-2 py-1 rounded-full bg-primary/10 text-primary text-xs font-medium">
                             {org.category}
                           </span>
                         </div>
                       </div>
-
-                      <div className="space-y-2 mb-4">
-                        <div className="flex justify-between text-sm">
-                          <span className="text-muted-foreground">Progress</span>
-                          <span className="font-medium">
-                            ${org.raised.toLocaleString()} / ${org.goal.toLocaleString()}
-                          </span>
-                        </div>
-                        <Progress value={progress} />
-                        <p className="text-xs text-primary font-medium">{org.impact}</p>
-                      </div>
-
-                      <Button className="w-full" onClick={() => setSelectedOrg(org.id)}>
+                      <Button className="w-full" onClick={() => { setOrgId(String(org.id)); }}>
                         <Heart className="w-4 h-4 mr-2" />
-                        Donate Now
+                        Donate to {org.name}
                       </Button>
                     </div>
-                  )
+                  );
                 })}
               </div>
             </CardContent>
@@ -168,35 +190,49 @@ export default function DonationsPage() {
               <CardDescription>Your recent contributions</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="space-y-3">
-                {donationHistory.map((donation) => (
-                  <div
-                    key={donation.id}
-                    className="flex items-center justify-between p-4 rounded-lg border border-border"
-                  >
-                    <div className="flex items-center gap-4">
-                      <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
-                        <Heart className="w-5 h-5 text-primary" />
-                      </div>
-                      <div>
-                        <p className="font-medium text-foreground">{donation.organization}</p>
-                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                          <span>{donation.date}</span>
-                          <span>•</span>
-                          <span className={donation.source === "Rounded" ? "text-primary" : ""}>{donation.source}</span>
+              {loading ? (
+                <div className="p-6 text-sm text-muted-foreground">Loading your donations…</div>
+              ) : error ? (
+                <div className="p-6 text-sm text-red-600">
+                  Failed to load donations: {String(error.message || error)}
+                </div>
+              ) : donations?.length ? (
+                <div className="space-y-3">
+                  {donations.map((d) => {
+                    const OrgIcon = organizations.find((o) => String(o.id) === String(d.orgId))?.icon || Heart;
+                    return (
+                      <div key={d.id} className="flex items-center justify-between p-4 rounded-lg border border-border">
+                        <div className="flex items-center gap-4">
+                          <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
+                            <OrgIcon className="w-5 h-5 text-primary" />
+                          </div>
+                          <div>
+                            <p className="font-medium text-foreground">
+                              {organizations.find((o) => String(o.id) === String(d.orgId))?.name || "Organization"}
+                            </p>
+                            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                              <span>{d.date ? new Date(d.date).toLocaleDateString() : "-"}</span>
+                              <span>•</span>
+                              <span>Service</span>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <p className="font-semibold text-primary">${Number(d.amount || 0).toFixed(2)}</p>
                         </div>
                       </div>
-                    </div>
-                    <div className="text-right">
-                      <p className="font-semibold text-primary">${donation.amount.toFixed(2)}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="p-6 text-sm text-muted-foreground border rounded-lg">
+                  No donations made.
+                </div>
+              )}
             </CardContent>
           </Card>
         </div>
       </main>
     </div>
-  )
+  );
 }
