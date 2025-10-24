@@ -10,23 +10,26 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Heart, TreePine, Droplet, Wind, Users } from "lucide-react";
 import { ensureCustomerIds, ensureNumericCustomerId } from "@/lib/utils";
 import { useDonationsByCustomer, useAddDonation } from "@/hooks/useDonations";
+import { useOrganisations } from "@/hooks/useOrganisations";
 
-const organizations = [
-  { id: 1, name: "Ocean Cleanup Initiative", icon: Droplet, category: "Environment" },
-  { id: 2, name: "Reforestation Project", icon: TreePine, category: "Climate" },
-  { id: 3, name: "Clean Air Campaign", icon: Wind, category: "Environment" },
-  { id: 4, name: "Community Gardens", icon: Users, category: "Community" },
-];
+// simple icon mapper by country/keyword so cards look nice
+function pickIconFor(org) {
+  const n = (org?.name || "").toLowerCase();
+  const c = (org?.country || "").toLowerCase();
+  if (n.includes("ocean") || c.includes("sea") || c.includes("water")) return Droplet;
+  if (n.includes("forest") || n.includes("tree") || c.includes("forest")) return TreePine;
+  if (n.includes("air") || n.includes("wind")) return Wind;
+  if (n.includes("community") || n.includes("people")) return Users;
+  return Heart;
+}
 
 export default function DonationsPage() {
   const [customer, setCustomer] = useState({ id: null, intId: null });
+  useEffect(() => { setCustomer(ensureCustomerIds()); }, []);
 
-  useEffect(() => {
-    setCustomer(ensureCustomerIds()); // { id: "user_xxx", intId: number }
-  }, []);
-
-  // Load donation history using the numeric id
+  // Load donation history (per user) + organisations (from service)
   const { donations, loading, error, refresh } = useDonationsByCustomer(customer.intId);
+  const { organisations, loading: orgLoading, error: orgError } = useOrganisations();
 
   // Donate form
   const [orgId, setOrgId] = useState("");
@@ -47,6 +50,9 @@ export default function DonationsPage() {
     setOrgId("");
     refresh();
   };
+
+  // pick first 4 as "featured"
+  const featured = (organisations || []).slice(0, 4);
 
   return (
     <div className="min-h-screen bg-background">
@@ -103,21 +109,26 @@ export default function DonationsPage() {
             <Card>
               <CardHeader className="flex flex-row items-center justify-between pb-2">
                 <CardTitle className="text-sm font-medium text-muted-foreground">Give Today</CardTitle>
-                <Wind className="w-4 h-4 text-primary" />
+                <Users className="w-4 h-4 text-primary" />
               </CardHeader>
               <CardContent>
                 <form className="space-y-3" onSubmit={onDonate}>
                   <div className="grid grid-cols-5 gap-2">
                     <div className="col-span-3">
                       <Label className="text-xs">Organization</Label>
-                      <Select value={orgId} onValueChange={setOrgId}>
-                        <SelectTrigger><SelectValue placeholder="Choose charity" /></SelectTrigger>
+                      <Select value={orgId} onValueChange={setOrgId} disabled={orgLoading || !!orgError}>
+                        <SelectTrigger><SelectValue placeholder={orgLoading ? "Loading..." : "Choose charity"} /></SelectTrigger>
                         <SelectContent>
-                          {organizations.map((o) => (
+                          {(organisations || []).map((o) => (
                             <SelectItem key={o.id} value={String(o.id)}>{o.name}</SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
+                      {orgError && (
+                        <p className="text-xs text-red-600 mt-1">
+                          Failed to load organisations: {String(orgError.message || orgError)}
+                        </p>
+                      )}
                     </div>
                     <div className="col-span-2">
                       <Label className="text-xs">Amount (SGD)</Label>
@@ -132,7 +143,11 @@ export default function DonationsPage() {
                       />
                     </div>
                   </div>
-                  <Button type="submit" className="w-full" disabled={adding || !orgId || !amount || !customer.intId}>
+                  <Button
+                    type="submit"
+                    className="w-full"
+                    disabled={adding || !orgId || !amount || !customer.intId || orgLoading}
+                  >
                     <Heart className="w-4 h-4 mr-2" />
                     {adding ? "Processing..." : "Donate Now"}
                   </Button>
@@ -146,40 +161,53 @@ export default function DonationsPage() {
             </Card>
           </div>
 
-          {/* Featured Orgs */}
+          {/* Featured Orgs (from service) */}
           <Card>
             <CardHeader>
               <CardTitle>Featured Organizations</CardTitle>
               <CardDescription>Choose where your donations make an impact</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {organizations.map((org) => {
-                  const Icon = org.icon;
-                  return (
-                    <div
-                      key={org.id}
-                      className="p-4 rounded-lg border border-border hover:bg-muted/50 transition-colors"
-                    >
-                      <div className="flex items-start gap-4 mb-4">
-                        <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
-                          <Icon className="w-6 h-6 text-primary" />
+              {orgLoading ? (
+                <div className="p-6 text-sm text-muted-foreground">Loading organisations…</div>
+              ) : orgError ? (
+                <div className="p-6 text-sm text-red-600">
+                  Failed to load organisations: {String(orgError.message || orgError)}
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {featured.map((org) => {
+                    const Icon = pickIconFor(org);
+                    return (
+                      <div
+                        key={org.id}
+                        className="p-4 rounded-lg border border-border hover:bg-muted/50 transition-colors"
+                      >
+                        <div className="flex items-start gap-4 mb-4">
+                          <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
+                            <Icon className="w-6 h-6 text-primary" />
+                          </div>
+                          <div className="flex-1">
+                            <h3 className="font-semibold text-foreground mb-1">{org.name}</h3>
+                            {!!org.country && (
+                              <span className="inline-block px-2 py-1 rounded-full bg-primary/10 text-primary text-xs font-medium">
+                                {org.country}
+                              </span>
+                            )}
+                            {!!org.description && (
+                              <p className="text-sm text-muted-foreground mt-1 line-clamp-2">{org.description}</p>
+                            )}
+                          </div>
                         </div>
-                        <div className="flex-1">
-                          <h3 className="font-semibold text-foreground mb-1">{org.name}</h3>
-                          <span className="inline-block px-2 py-1 rounded-full bg-primary/10 text-primary text-xs font-medium">
-                            {org.category}
-                          </span>
-                        </div>
+                        <Button className="w-full" onClick={() => { setOrgId(String(org.id)); }}>
+                          <Heart className="w-4 h-4 mr-2" />
+                          Donate to {org.name}
+                        </Button>
                       </div>
-                      <Button className="w-full" onClick={() => { setOrgId(String(org.id)); }}>
-                        <Heart className="w-4 h-4 mr-2" />
-                        Donate to {org.name}
-                      </Button>
-                    </div>
-                  );
-                })}
-              </div>
+                    );
+                  })}
+                </div>
+              )}
             </CardContent>
           </Card>
 
@@ -199,21 +227,21 @@ export default function DonationsPage() {
               ) : donations?.length ? (
                 <div className="space-y-3">
                   {donations.map((d) => {
-                    const OrgIcon = organizations.find((o) => String(o.id) === String(d.orgId))?.icon || Heart;
+                    const org = (organisations || []).find((o) => String(o.id) === String(d.orgId));
+                    const Icon = pickIconFor(org);
                     return (
                       <div key={d.id} className="flex items-center justify-between p-4 rounded-lg border border-border">
                         <div className="flex items-center gap-4">
                           <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
-                            <OrgIcon className="w-5 h-5 text-primary" />
+                            <Icon className="w-5 h-5 text-primary" />
                           </div>
                           <div>
                             <p className="font-medium text-foreground">
-                              {organizations.find((o) => String(o.id) === String(d.orgId))?.name || "Organization"}
+                              {org?.name || `Organisation #${d.orgId}`}
                             </p>
                             <div className="flex items-center gap-2 text-sm text-muted-foreground">
                               <span>{d.date ? new Date(d.date).toLocaleDateString() : "-"}</span>
-                              <span>•</span>
-                              <span>Service</span>
+                              {org?.country ? (<><span>•</span><span>{org.country}</span></>) : null}
                             </div>
                           </div>
                         </div>
