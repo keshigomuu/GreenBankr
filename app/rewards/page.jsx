@@ -9,26 +9,37 @@ import { Star, Zap } from "lucide-react";
 import RewardCard from "@/components/rewards/RewardCard";
 import ClaimsTable from "@/components/rewards/ClaimsTable";
 import { ensureCustomerId } from "@/lib/utils";
-import { useRewardsCatalog, useMyClaims, useClaimReward } from "@/hooks/useRewards";
+import { useRewardsCatalog, useMyClaims } from "@/hooks/useRewards";
+import { useLoyaltyPoints } from "@/hooks/useLoyalty";
 
 export default function RewardsPage() {
-  const currentPoints = 2450;
-  const nextTierPoints = 3000;
-  const progress = (currentPoints / nextTierPoints) * 100;
-
   const [customerId, setCustomerId] = useState(null);
   useEffect(() => setCustomerId(ensureCustomerId()), []);
 
   const { rewards, loading: catalogLoading, error: catalogError } = useRewardsCatalog(true);
   const { claims, loading: claimsLoading, error: claimsError } = useMyClaims(customerId);
-  const { claim, loading: claimLoading } = useClaimReward();
+  const {
+    points,                 // <-- always a number now
+    loading: pointsLoading,
+    error: pointsError,
+    refresh: refreshPoints,
+  } = useLoyaltyPoints(customerId);
 
-  const claimingDisabled = useMemo(() => claimLoading || !customerId, [claimLoading, customerId]);
+  const nextTierPoints = 3000;
+  const progress = nextTierPoints ? Math.min((points / nextTierPoints) * 100, 100) : 0;
 
   async function handleClaim(reward) {
     if (!customerId) return;
-    await claim({ customerId, rewardId: reward.id });
-    window.location.reload();
+    const res = await fetch("/api/rewards/redeem", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ customerId, rewardId: reward.id }),
+    });
+    const j = await res.json();
+    if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`);
+    // Refresh balance & claims after redeem
+    refreshPoints();
+    window.location.reload(); // or refetch via hooks if you prefer no full reload
   }
 
   return (
@@ -36,11 +47,13 @@ export default function RewardsPage() {
       <Navigation />
       <main className="md:ml-64 p-4 md:p-8 pt-20 md:pt-8">
         <div className="max-w-7xl mx-auto space-y-6">
+          {/* Header */}
           <div>
             <h1 className="text-3xl font-bold text-foreground">Rewards</h1>
             <p className="text-muted-foreground mt-1">Redeem your points for exclusive rewards</p>
           </div>
 
+          {/* Points Overview */}
           <Card className="bg-gradient-to-br from-primary/10 via-background to-accent/10 border-primary/20">
             <CardContent className="pt-6">
               <div className="flex flex-col md:flex-row items-center justify-between gap-6">
@@ -50,14 +63,22 @@ export default function RewardsPage() {
                   </div>
                   <div>
                     <p className="text-sm text-muted-foreground">Your Points Balance</p>
-                    <p className="text-4xl font-bold text-foreground">{currentPoints.toLocaleString()}</p>
+                    <p className="text-4xl font-bold text-foreground">
+                      {pointsLoading ? "…" : points.toLocaleString()}
+                    </p>
+                    {pointsError && (
+                      <p className="text-xs text-red-600 mt-1">
+                        Failed to load points: {String(pointsError.message || pointsError)}
+                      </p>
+                    )}
                   </div>
                 </div>
+
                 <div className="flex-1 max-w-md w-full">
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-sm font-medium">Progress to Gold Tier</span>
                     <span className="text-sm text-muted-foreground">
-                      {nextTierPoints - currentPoints} points to go
+                      {Math.max(nextTierPoints - points, 0)} points to go
                     </span>
                   </div>
                   <Progress value={progress} className="h-3" />
@@ -71,6 +92,7 @@ export default function RewardsPage() {
             </CardContent>
           </Card>
 
+          {/* Rewards Catalog */}
           <Card>
             <CardHeader>
               <CardTitle>Available Rewards</CardTitle>
@@ -89,8 +111,8 @@ export default function RewardsPage() {
                     <RewardCard
                       key={reward.id}
                       reward={reward}
-                      currentPoints={currentPoints}
-                      onClaim={!claimingDisabled ? handleClaim : undefined}
+                      currentPoints={points}
+                      onClaim={handleClaim}
                     />
                   ))}
                 </div>
@@ -102,6 +124,7 @@ export default function RewardsPage() {
             </CardContent>
           </Card>
 
+          {/* My Claims */}
           <Card>
             <CardHeader>
               <CardTitle>My Claimed Rewards</CardTitle>
