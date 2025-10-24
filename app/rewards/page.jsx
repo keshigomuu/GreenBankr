@@ -12,22 +12,48 @@ import { ensureCustomerId } from "@/lib/utils";
 import { useRewardsCatalog, useMyClaims } from "@/hooks/useRewards";
 import { useLoyaltyPoints } from "@/hooks/useLoyalty";
 
+/* ----- Tier rules (lifetime-based) -----
+  < 1500              -> Member
+  1500 - 2499         -> Bronze
+  2500 - 3499         -> Silver
+  >= 3500             -> Gold
+---------------------------------------- */
+function computeTier(lifetime) {
+  if (lifetime >= 3500) return { name: "Gold", currentMin: 3500, nextMin: null }; // top tier
+  if (lifetime >= 2500) return { name: "Silver", currentMin: 2500, nextMin: 3500 };
+  if (lifetime >= 1500) return { name: "Bronze", currentMin: 1500, nextMin: 2500 };
+  return { name: "Member", currentMin: 0, nextMin: 1500 };
+}
+
 export default function RewardsPage() {
   const [customerId, setCustomerId] = useState(null);
   useEffect(() => setCustomerId(ensureCustomerId()), []);
 
+  // Data
   const { rewards, loading: catalogLoading, error: catalogError } = useRewardsCatalog(true);
   const { claims, loading: claimsLoading, error: claimsError } = useMyClaims(customerId);
-  const {
-    points,                 // <-- always a number now
-    loading: pointsLoading,
-    error: pointsError,
-    refresh: refreshPoints,
-  } = useLoyaltyPoints(customerId);
+  const { points: currentPoints, loading: pointsLoading, error: pointsError, refresh: refreshPoints } =
+    useLoyaltyPoints(customerId);
 
-  const nextTierPoints = 3000;
-  const progress = nextTierPoints ? Math.min((points / nextTierPoints) * 100, 100) : 0;
+  // ----- Lifetime points = current balance + total spent historically -----
+  const totalSpent = useMemo(
+    () => (Array.isArray(claims) ? claims.reduce((sum, c) => sum + Number(c.pointsCost || 0), 0) : 0),
+    [claims]
+  );
+  const lifetimePoints = (currentPoints ?? 0) + totalSpent;
 
+  // Tier & progress-to-next-tier (based on lifetime, not current balance)
+  const { name: tierName, currentMin, nextMin } = computeTier(lifetimePoints);
+  const pointsToNext = nextMin ? Math.max(nextMin - lifetimePoints, 0) : 0;
+  const progress = (() => {
+    if (!nextMin) return 100; // Gold maxed
+    const span = nextMin - currentMin || 1;
+    const pos = Math.min(Math.max(lifetimePoints - currentMin, 0), span);
+    return Math.round((pos / span) * 100);
+  })();
+  const nextTierLabel = nextMin ? (tierName === "Member" ? "Bronze" : tierName === "Bronze" ? "Silver" : "Gold") : "Max";
+
+  // Claim action -> uses orchestrated /api/rewards/redeem (already deducts points in Loyalty)
   async function handleClaim(reward) {
     if (!customerId) return;
     const res = await fetch("/api/rewards/redeem", {
@@ -37,9 +63,9 @@ export default function RewardsPage() {
     });
     const j = await res.json();
     if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`);
-    // Refresh balance & claims after redeem
+    // Refresh balance & history to keep lifetime stable after redemption
     refreshPoints();
-    window.location.reload(); // or refetch via hooks if you prefer no full reload
+    window.location.reload(); // simplest way to refetch claims; you can swap for hook-driven refresh
   }
 
   return (
@@ -53,7 +79,7 @@ export default function RewardsPage() {
             <p className="text-muted-foreground mt-1">Redeem your points for exclusive rewards</p>
           </div>
 
-          {/* Points Overview */}
+          {/* Lifetime-based Tier & Balance */}
           <Card className="bg-gradient-to-br from-primary/10 via-background to-accent/10 border-primary/20">
             <CardContent className="pt-6">
               <div className="flex flex-col md:flex-row items-center justify-between gap-6">
@@ -64,28 +90,35 @@ export default function RewardsPage() {
                   <div>
                     <p className="text-sm text-muted-foreground">Your Points Balance</p>
                     <p className="text-4xl font-bold text-foreground">
-                      {pointsLoading ? "…" : points.toLocaleString()}
+                      {pointsLoading ? "…" : currentPoints.toLocaleString()}
                     </p>
                     {pointsError && (
                       <p className="text-xs text-red-600 mt-1">
                         Failed to load points: {String(pointsError.message || pointsError)}
                       </p>
                     )}
+                    <div className="mt-1 text-xs text-muted-foreground">
+                      Lifetime points: <span className="font-medium">{lifetimePoints.toLocaleString()}</span>
+                    </div>
                   </div>
                 </div>
 
                 <div className="flex-1 max-w-md w-full">
                   <div className="flex items-center justify-between mb-2">
-                    <span className="text-sm font-medium">Progress to Gold Tier</span>
+                    <span className="text-sm font-medium">
+                      Progress to {nextMin ? `${nextTierLabel} Tier` : "Top Tier"}
+                    </span>
                     <span className="text-sm text-muted-foreground">
-                      {Math.max(nextTierPoints - points, 0)} points to go
+                      {pointsToNext.toLocaleString()} points to go
                     </span>
                   </div>
                   <Progress value={progress} className="h-3" />
                   <div className="flex items-center gap-2 mt-2">
-                    <Badge variant="secondary">Silver Tier</Badge>
+                    <Badge variant="secondary">{tierName} Tier</Badge>
                     <Zap className="w-4 h-4 text-muted-foreground" />
-                    <span className="text-xs text-muted-foreground">Unlock exclusive rewards at Gold</span>
+                    <span className="text-xs text-muted-foreground">
+                      Tiers are based on lifetime points, not current balance
+                    </span>
                   </div>
                 </div>
               </div>
@@ -111,7 +144,7 @@ export default function RewardsPage() {
                     <RewardCard
                       key={reward.id}
                       reward={reward}
-                      currentPoints={points}
+                      currentPoints={currentPoints}
                       onClaim={handleClaim}
                     />
                   ))}
