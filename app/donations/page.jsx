@@ -64,7 +64,7 @@ export default function DonationsPage() {
           <div>
             <h1 className="text-3xl font-bold text-foreground">Donations</h1>
             <p className="text-muted-foreground mt-1">
-              Support causes you care about {customer.intId ? `(ID ${customer.intId})` : ""}
+              Support causes you care about: 
             </p>
           </div>
 
