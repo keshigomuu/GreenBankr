@@ -1,25 +1,33 @@
 import { NextResponse } from "next/server";
 import { DonationsAPI } from "@/lib/donations-api";
 
+export const runtime = "nodejs";
+
 export async function GET(req) {
   try {
     const { searchParams } = new URL(req.url);
-    const customerIdRaw = searchParams.get("customerId");
-    if (customerIdRaw == null) {
-      return NextResponse.json({ error: "customerId is required" }, { status: 400 });
+    const customerId = searchParams.get("customerId");
+    if (!customerId) {
+      return NextResponse.json({ error: "Missing customerId" }, { status: 400 });
     }
 
-    const customerId = parseInt(String(customerIdRaw), 10);
-    if (!Number.isFinite(customerId) || customerId <= 0) {
-      return NextResponse.json(
-        { error: "customerId must be a positive integer" },
-        { status: 400 }
-      );
+    const donations = await DonationsAPI.getByCustomer(customerId);
+    // Normal success
+    return NextResponse.json({ donations }, { status: 200 });
+  } catch (err) {
+    // Graceful fallback for “no data” → return empty list
+    const msg = String(err?.message || "");
+    const noData =
+      /no donations|no record|not found|empty/i.test(msg) ||
+      msg.includes("GetDonation failed (404)") ||
+      msg.includes("GetDonation failed (500)") ||
+      msg.includes("GetDonation failed (204)");
+
+    if (noData) {
+      return NextResponse.json({ donations: [] }, { status: 200 });
     }
 
-    const rows = await DonationsAPI.getByCustomer(customerId);
-    return NextResponse.json({ donations: rows }, { status: 200 });
-  } catch (e) {
-    return NextResponse.json({ error: String(e.message || e) }, { status: 502 });
+    // Real error
+    return NextResponse.json({ error: msg || "Server error" }, { status: 500 });
   }
 }

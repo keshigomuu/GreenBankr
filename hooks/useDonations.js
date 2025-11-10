@@ -2,28 +2,47 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-export function useDonationsByCustomer(customerIdInt) {
-  const [data, setData] = useState({ donations: [] });
-  const [loading, setLoading] = useState(Boolean(customerIdInt));
+/**
+ * Fetch donations for a customer.
+ * Any 404/204/500 from our server route is normalized to [] (no error).
+ */
+export function useDonationsByCustomer(customerId) {
+  const [donations, setDonations] = useState([]);
+  const [loading, setLoading] = useState(Boolean(customerId));
   const [error, setError] = useState(null);
 
   const refresh = useCallback(() => {
-    if (!customerIdInt) return;
+    if (!customerId) return;
     setLoading(true);
     setError(null);
-    fetch(`/api/donations/by-customer?customerId=${encodeURIComponent(customerIdInt)}`)
+
+    fetch(`/api/donations/by-customer?customerId=${encodeURIComponent(customerId)}`)
       .then(async (r) => {
-        const j = await r.json();
-        if (!r.ok) throw new Error(j?.error || `HTTP ${r.status}`);
-        return j;
+        const body = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          const status = r.status;
+          const msg = String(body?.error || "");
+          // Normalize “no data” to empty list
+          if (
+            status === 404 ||
+            status === 204 ||
+            status === 500 ||
+            /no donations|not found|empty/i.test(msg)
+          ) {
+            return { donations: [] };
+          }
+          throw new Error(msg || `HTTP ${status}`);
+        }
+        return body;
       })
-      .then((d) => setData(d))
+      .then((d) => setDonations(d.donations || []))
       .catch((e) => setError(e))
       .finally(() => setLoading(false));
-  }, [customerIdInt]);
+  }, [customerId]);
 
   useEffect(() => { refresh(); }, [refresh]);
-  return { ...data, loading, error, refresh };
+
+  return { donations, loading, error, refresh };
 }
 
 export function useAddDonation() {
@@ -37,9 +56,9 @@ export function useAddDonation() {
       const res = await fetch("/api/donations/add", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ customerId, amount, orgId }), // customerId must already be numeric
+        body: JSON.stringify({ customerId, amount, orgId }),
       });
-      const j = await res.json();
+      const j = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`);
       return j; // { donationId }
     } catch (e) {

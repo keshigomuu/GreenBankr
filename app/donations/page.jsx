@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Navigation } from "@/components/navigation";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Heart, TreePine, Droplet, Wind, Users } from "lucide-react";
-import { ensureCustomerIds, ensureNumericCustomerId } from "@/lib/utils";
+import { useAuth } from "@/contexts/auth-context";
 import { useDonationsByCustomer, useAddDonation } from "@/hooks/useDonations";
 
 const organizations = [
@@ -19,14 +19,11 @@ const organizations = [
 ];
 
 export default function DonationsPage() {
-  const [customer, setCustomer] = useState({ id: null, intId: null });
+  const { getCustomerId } = useAuth();
+  const customerId = getCustomerId(); // e.g. "0000002737"
 
-  useEffect(() => {
-    setCustomer(ensureCustomerIds()); // { id: "user_xxx", intId: number }
-  }, []);
-
-  // Load donation history using the numeric id
-  const { donations, loading, error, refresh } = useDonationsByCustomer(customer.intId);
+  // Load donation history for this exact id
+  const { donations, loading, error, refresh } = useDonationsByCustomer(customerId);
 
   // Donate form
   const [orgId, setOrgId] = useState("");
@@ -40,9 +37,8 @@ export default function DonationsPage() {
 
   const onDonate = async (e) => {
     e.preventDefault();
-    const numericCustomerId = ensureNumericCustomerId();
-    if (!numericCustomerId || !orgId || !amount) return;
-    await add({ customerId: numericCustomerId, orgId: parseInt(orgId, 10), amount: Number(amount) });
+    if (!customerId || !orgId || !amount) return;
+    await add({ customerId, orgId: parseInt(orgId, 10), amount: Number(amount) });
     setAmount("");
     setOrgId("");
     refresh();
@@ -58,7 +54,7 @@ export default function DonationsPage() {
           <div>
             <h1 className="text-3xl font-bold text-foreground">Donations</h1>
             <p className="text-muted-foreground mt-1">
-              Support causes you care about {customer.intId ? `(ID ${customer.intId})` : ""}
+              Support causes you care about {customerId ? `(ID ${customerId})` : ""}
             </p>
           </div>
 
@@ -132,7 +128,7 @@ export default function DonationsPage() {
                       />
                     </div>
                   </div>
-                  <Button type="submit" className="w-full" disabled={adding || !orgId || !amount || !customer.intId}>
+                  <Button type="submit" className="w-full" disabled={adding || !orgId || !amount || !customerId}>
                     <Heart className="w-4 h-4 mr-2" />
                     {adding ? "Processing..." : "Donate Now"}
                   </Button>
