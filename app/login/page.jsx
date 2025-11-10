@@ -24,58 +24,56 @@ export default function LoginPage() {
   const [error, setError] = useState("");
 
   const handleIcLogin = async (e) => {
-  e.preventDefault();
-  setError("");
-  setIsLoading(true);
+    e.preventDefault();
+    setError("");
+    setIsLoading(true);
 
-  try {
-    const cleanIc = icNumber.trim().toUpperCase();
-    if (!cleanIc) {
-      setError("Please enter your IC Number");
+    try {
+      const cleanIc = icNumber.trim().toUpperCase();
+      if (!cleanIc) {
+        setError("Please enter your IC Number");
+        setIsLoading(false);
+        return;
+      }
+
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ icNumber: cleanIc }),
+      });
+
+      const ct = res.headers.get("content-type") || "";
+      const isJson = ct.toLowerCase().includes("application/json");
+      const data = isJson ? await res.json() : { success: false, error: await res.text() };
+
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.error || `Login failed (${res.status})`);
+      }
+
+      // data.user is normalized
+      const user = data.user;
+
+      // Store in global auth state and localStorage
+      login({
+        customerId: user.customerId,
+        icNumber: user.icNumber,
+        name:
+          (user.givenName || user.familyName) ?
+            `${user.givenName ?? ""} ${user.familyName ?? ""}`.trim() :
+            "Customer",
+        email: user.email || "",
+        phone: user.phone || "",
+        raw: user.raw,
+      });
+
+      // Go wherever you want post-login; Rewards is fine
+      router.push("/rewards");
+    } catch (err) {
+      setError(err.message || "Login failed");
+    } finally {
       setIsLoading(false);
-      return;
     }
-
-    const res = await fetch("/api/auth/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ icNumber: cleanIc }),
-    });
-
-    // Safe parse: only json() if content-type is JSON
-    const ct = res.headers.get("content-type") || "";
-    let data;
-    if (ct.toLowerCase().includes("application/json")) {
-      data = await res.json();
-    } else {
-      const text = await res.text();
-      throw new Error(text || `Server error (${res.status})`);
-    }
-
-    if (!res.ok || !data?.success) {
-      const msg = data?.error || `Login failed (${res.status})`;
-      throw new Error(msg);
-    }
-
-    const userData = {
-      id: data.customer.customerID || cleanIc,
-      icNumber: cleanIc,
-      email: data.customer.emailAddress || "",
-      name:
-        data.customer.customerName ||
-        `${data.customer.firstName ?? ""} ${data.customer.lastName ?? ""}`.trim() ||
-        "Customer",
-      customerData: data.customer.raw,
-    };
-
-    login(userData);
-    router.push("/rewards");
-  } catch (err) {
-    setError(err.message || "Login failed");
-  } finally {
-    setIsLoading(false);
-  }
-};
+  };
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary/5 via-background to-accent/5 p-4">
@@ -97,7 +95,7 @@ export default function LoginPage() {
               <Input
                 id="icNumber"
                 type="text"
-                placeholder="T5555555T"
+                placeholder="T55555555T"
                 value={icNumber}
                 onChange={(e) => setIcNumber(e.target.value)}
                 required
@@ -107,7 +105,7 @@ export default function LoginPage() {
             {error && <p className="text-sm text-destructive">{error}</p>}
           </CardContent>
 
-          <CardFooter className="flex flex-col gap-4">
+        <CardFooter className="flex flex-col gap-4">
             <Button type="submit" className="w-full" disabled={isLoading}>
               {isLoading ? (
                 <>

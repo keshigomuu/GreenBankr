@@ -1,98 +1,125 @@
-// app/api/auth/login/route.js
-export const runtime = "nodejs"; // Changed from "node" to "nodejs"
 import { NextResponse } from "next/server";
 
-/* --- helpers --- */
-function basicAuthHeader() {
-  const u = (process.env.CUSTOMER_API_USERNAME || "").trim();
-  const p = (process.env.CUSTOMER_API_PASSWORD || "").trim();
-  const token = Buffer.from(`${u}:${p}`).toString("base64");
-  return `Basic ${token}`;
+// Force Node runtime (good for Buffer & server-only envs)
+export const runtime = "nodejs";
+
+// Simple masker so we don't leak PII unless explicitly allowed
+function maskValue(v) {
+  if (!v || typeof v !== "string") return v;
+  if (v.includes("@")) return v.replace(/(.).+(@.+)/, "$1***$2"); // email
+  return v.length <= 4 ? "***" : v.slice(0, 2) + "***" + v.slice(-2);
 }
 
-function urlForIC(ic) {
-  const base = (process.env.CUSTOMER_API_BASE || "https://smuedu-dev.outsystemsenterprise.com")
-    .replace(/\/+$/, "");
-  const endpoint = "/gateway/rest/customer";
-  return `${base}${endpoint}?CertificateNo=${encodeURIComponent(ic)}`;
-}
-
-async function readSafe(resp) {
-  const ct = resp.headers.get("content-type") || "";
-  if (ct.toLowerCase().includes("application/json")) {
-    try {
-      return { kind: "json", body: await resp.json() };
-    } catch {
-      // fall-through to text below
-    }
+function buildMasked(raw) {
+  try {
+    const copy = JSON.parse(JSON.stringify(raw));
+    if (copy?.profile?.email) copy.profile.email = maskValue(copy.profile.email);
+    if (copy?.cellphone?.phoneNumber)
+      copy.cellphone.phoneNumber = maskValue(copy.cellphone.phoneNumber);
+    if (copy?.phone?.localNumber) copy.phone.localNumber = maskValue(copy.phone.localNumber);
+    if (copy?.certificate?.certificateNo)
+      copy.certificate.certificateNo = maskValue(copy.certificate.certificateNo);
+    if (copy?.taxIdentifier) copy.taxIdentifier = maskValue(copy.taxIdentifier);
+    return copy;
+  } catch {
+    return raw;
   }
-  return { kind: "text", body: await resp.text() };
 }
 
-/* --- handler --- */
 export async function POST(req) {
   try {
     const { icNumber } = await req.json();
-    const ic = (icNumber || "").trim().toUpperCase();
-    
-    if (!ic) {
-      return NextResponse.json({ success: false, error: "Missing icNumber" }, { status: 400 });
-    }
-
-    console.log('🔍 Looking up customer with IC:', ic);
-    console.log('🌐 API URL:', urlForIC(ic));
-
-    const resp = await fetch(urlForIC(ic), {
-      method: "GET",
-      headers: {
-        Accept: "application/json",
-        Authorization: basicAuthHeader(),
-      },
-      cache: "no-store",
-      redirect: "manual",
-    });
-
-    console.log('📊 Response status:', resp.status);
-
-    const { kind, body } = await readSafe(resp);
-    console.log('📄 Response body:', body);
-
-    if (!resp.ok) {
+    if (!icNumber || typeof icNumber !== "string") {
       return NextResponse.json(
-        {
-          success: false,
-          error: kind === "json" ? JSON.stringify(body) : (body || `Upstream error ${resp.status}`),
-        },
-        { status: resp.status }
+        { success: false, error: "Missing icNumber" },
+        { status: 400 }
       );
     }
 
-    // OK → user exists
-    const data = kind === "json" ? body : {};
-    const firstName = data?.givenName ?? data?.profile?.firstName ?? "";
-    const lastName = data?.familyName ?? data?.profile?.lastName ?? "";
-    const email = data?.email ?? data?.emailAddress ?? "";
-    const customerName = (data?.customerName ?? `${firstName} ${lastName}`.trim()) || "Customer";
-    const customerID = data?.profile?.BankId ?? data?.BankId ?? null;
+    // Support both keys so it matches your .env.local
+    const baseUrl =
+      process.env.CUSTOMER_API_BASE_URL ||
+      process.env.CUSTOMER_API_BASE ||
+      "";
 
-    const customer = {
-      icNumber: ic,
-      emailAddress: email,
-      firstName,
-      lastName,
-      customerName,
-      customerID,
-      raw: data,
+    const username = process.env.CUSTOMER_API_USERNAME || "";
+    const password = process.env.CUSTOMER_API_PASSWORD || "";
+
+    // Helpful visibility in the server console
+    console.log("[login] ENV CHECK", {
+      CUSTOMER_API_BASE_URL: process.env.CUSTOMER_API_BASE_URL ? "set" : "unset",
+      CUSTOMER_API_BASE: process.env.CUSTOMER_API_BASE ? "set" : "unset",
+      CUSTOMER_API_USERNAME: username ? "set" : "unset",
+      CUSTOMER_API_PASSWORD: password ? "set" : "unset",
+    });
+
+    if (!baseUrl || !username || !password) {
+      return NextResponse.json(
+        { success: false, error: "Server is not configured (env missing)" },
+        { status: 500 }
+      );
+    }
+
+    const url = `${baseUrl.replace(/\/$/, "")}/customer?CertificateNo=${encodeURIComponent(
+      icNumber.trim().toUpperCase()
+    )}`;
+
+    const authHeader =
+      "Basic " + Buffer.from(`${username}:${password}`).toString("base64");
+
+    const res = await fetch(url, {
+      method: "GET",
+      headers: {
+        Authorization: authHeader,
+        Accept: "application/json",
+      },
+    });
+
+    const ct = res.headers.get("content-type") || "";
+    const isJson = ct.toLowerCase().includes("application/json");
+    const raw = isJson ? await res.json() : await res.text();
+
+    if (!res.ok) {
+      const errorMsg = isJson ? raw?.message || JSON.stringify(raw) : raw;
+      return NextResponse.json(
+        { success: false, error: errorMsg || `Upstream error (${res.status})` },
+        { status: 502 }
+      );
+    }
+
+    // ---- LOG THE PAYLOAD HERE ----
+    const verbose = (process.env.ALLOW_VERBOSE_LOGIN_LOGS || "").toLowerCase() === "true";
+    const toLog = verbose ? raw : buildMasked(raw);
+    console.log("[login] getCustomerDetails payload:", JSON.stringify(toLog, null, 2));
+    // --------------------------------
+
+    const customerId =
+      raw?.customer?.customerId ?? raw?.customer?.customerID ?? null;
+
+    // Also log the extracted id for sanity
+    console.log("[login] extracted customerId:", customerId);
+
+    if (!customerId) {
+      return NextResponse.json(
+        { success: false, error: "customerId not found in response", raw: verbose ? raw : undefined },
+        { status: 502 }
+      );
+    }
+
+    const normalizedUser = {
+      customerId,
+      icNumber: icNumber.trim().toUpperCase(),
+      givenName: raw?.givenName || "",
+      familyName: raw?.familyName || "",
+      email: raw?.profile?.email || "",
+      phone: raw?.cellphone?.phoneNumber || raw?.phone?.localNumber || "",
+      raw: verbose ? raw : undefined, // keep raw only when verbose logging is allowed
     };
 
-    console.log('✅ Customer found:', customer);
-
-    return NextResponse.json({ success: true, customer }, { status: 200 });
-    
+    return NextResponse.json({ success: true, user: normalizedUser }, { status: 200 });
   } catch (err) {
-    console.error('💥 API Error:', err);
     return NextResponse.json(
-      { success: false, error: err?.message || "Unexpected server error" },
+      { success: false, error: err?.message || "Unknown server error" },
       { status: 500 }
     );
   }
