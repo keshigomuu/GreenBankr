@@ -1,8 +1,15 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
+import { useAuth } from "@/contexts/auth-context";
 import { Navigation } from "@/components/navigation";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { Star, Zap } from "lucide-react";
@@ -19,13 +26,15 @@ import { useLoyaltyPoints } from "@/hooks/useLoyalty";
   >= 3500             -> Gold
 ---------------------------------------- */
 function computeTier(lifetime) {
-  if (lifetime >= 3500) return { name: "Gold", currentMin: 3500, nextMin: null }; // top tier
+  if (lifetime >= 3500)
+    return { name: "Gold", currentMin: 3500, nextMin: null }; // top tier
   if (lifetime >= 2500) return { name: "Silver", currentMin: 2500, nextMin: 3500 };
   if (lifetime >= 1500) return { name: "Bronze", currentMin: 1500, nextMin: 2500 };
   return { name: "Member", currentMin: 0, nextMin: 1500 };
 }
 
 export default function RewardsPage() {
+  const { user, isAuthenticated } = useAuth();
   const [customerId, setCustomerId] = useState(null);
   useEffect(() => setCustomerId(ensureCustomerId()), []);
 
@@ -68,6 +77,20 @@ export default function RewardsPage() {
     window.location.reload(); // simplest way to refetch claims; you can swap for hook-driven refresh
   }
 
+  const getCurrentUser = () => {
+    if (user) {
+      return {
+        id: user.id || user.icNumber,
+        email: user.email,
+        name: user.name,
+        customerData: user.customerData,
+      };
+    }
+    return { id: "guest", email: "guest@example.com" };
+  };
+
+  const [currentUser] = useState(getCurrentUser());
+
   return (
     <div className="min-h-screen bg-background">
       <Navigation />
@@ -76,7 +99,9 @@ export default function RewardsPage() {
           {/* Header */}
           <div>
             <h1 className="text-3xl font-bold text-foreground">Rewards</h1>
-            <p className="text-muted-foreground mt-1">Redeem your points for exclusive rewards</p>
+            <p className="text-muted-foreground mt-1">
+              Redeem your points for exclusive rewards
+            </p>
           </div>
 
           {/* Lifetime-based Tier & Balance */}
@@ -88,17 +113,23 @@ export default function RewardsPage() {
                     <Star className="w-8 h-8 text-primary-foreground" />
                   </div>
                   <div>
-                    <p className="text-sm text-muted-foreground">Your Points Balance</p>
+                    <p className="text-sm text-muted-foreground">
+                      Your Points Balance
+                    </p>
                     <p className="text-4xl font-bold text-foreground">
                       {pointsLoading ? "…" : currentPoints.toLocaleString()}
                     </p>
                     {pointsError && (
                       <p className="text-xs text-red-600 mt-1">
-                        Failed to load points: {String(pointsError.message || pointsError)}
+                        Failed to load points:{" "}
+                        {String(pointsError.message || pointsError)}
                       </p>
                     )}
                     <div className="mt-1 text-xs text-muted-foreground">
-                      Lifetime points: <span className="font-medium">{lifetimePoints.toLocaleString()}</span>
+                      Lifetime points:{" "}
+                      <span className="font-medium">
+                        {lifetimePoints.toLocaleString()}
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -106,7 +137,8 @@ export default function RewardsPage() {
                 <div className="flex-1 max-w-md w-full">
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-sm font-medium">
-                      Progress to {nextMin ? `${nextTierLabel} Tier` : "Top Tier"}
+                      Progress to{" "}
+                      {nextMin ? `${nextTierLabel} Tier` : "Top Tier"}
                     </span>
                     <span className="text-sm text-muted-foreground">
                       {pointsToNext.toLocaleString()} points to go
@@ -129,14 +161,19 @@ export default function RewardsPage() {
           <Card>
             <CardHeader>
               <CardTitle>Available Rewards</CardTitle>
-              <CardDescription>Choose from our selection of eco-friendly rewards</CardDescription>
+              <CardDescription>
+                Choose from our selection of eco-friendly rewards
+              </CardDescription>
             </CardHeader>
             <CardContent>
               {catalogLoading ? (
-                <div className="p-6 text-sm text-muted-foreground">Loading catalog…</div>
+                <div className="p-6 text-sm text-muted-foreground">
+                  Loading catalog…
+                </div>
               ) : catalogError ? (
                 <div className="p-6 text-sm text-red-600">
-                  Failed to load catalog: {String(catalogError.message || catalogError)}
+                  Failed to load catalog:{" "}
+                  {String(catalogError.message || catalogError)}
                 </div>
               ) : rewards.length ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -161,11 +198,15 @@ export default function RewardsPage() {
           <Card>
             <CardHeader>
               <CardTitle>My Claimed Rewards</CardTitle>
-              <CardDescription>Everything you’ve redeemed so far</CardDescription>
+              <CardDescription>
+                Everything you’ve redeemed so far
+              </CardDescription>
             </CardHeader>
             <CardContent>
               {claimsLoading ? (
-                <div className="p-6 text-sm text-muted-foreground">Loading your claims…</div>
+                <div className="p-6 text-sm text-muted-foreground">
+                  Loading your claims…
+                </div>
               ) : claimsError ? (
                 <div className="p-6 text-sm text-red-600">
                   Failed to load claims: {String(claimsError.message || claimsError)}

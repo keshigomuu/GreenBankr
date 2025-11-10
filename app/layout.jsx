@@ -1,23 +1,21 @@
-import { Geist, Geist_Mono } from "next/font/google"
-import { Analytics } from "@vercel/analytics/next"
-import "./globals.css"
+import { Inter } from 'next/font/google'
+import './globals.css'
+import { AuthProvider } from '@/contexts/auth-context'
 
-const _geist = Geist({ subsets: ["latin"] })
-const _geistMono = Geist_Mono({ subsets: ["latin"] })
+const inter = Inter({ subsets: ['latin'] })
 
 export const metadata = {
-  title: "GreenBankr - Sustainable Banking",
-  description:
-    "Banking that cares for the planet. Track your carbon impact, earn rewards, and support causes you believe in.",
-  generator: "v0.app",
+  title: 'GreenBankr - Sustainable Banking',
+  description: 'Banking for a greener future',
 }
 
 export default function RootLayout({ children }) {
   return (
     <html lang="en">
-      <body className="font-sans antialiased">
-        {children}
-        <Analytics />
+      <body className={inter.className}>
+        <AuthProvider>
+          {children}
+        </AuthProvider>
       </body>
     </html>
   )
