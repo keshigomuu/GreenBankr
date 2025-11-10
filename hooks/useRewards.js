@@ -7,23 +7,22 @@ export function useRewardsCatalog(active = true) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  useEffect(() => {
-    let cancel = false;
+  const refresh = useCallback(() => {
     setLoading(true);
     setError(null);
     fetch(`/api/rewards/catalog?active=${active}`)
       .then(async (r) => {
-        const j = await r.json();
+        const j = await r.json().catch(() => ({}));
         if (!r.ok) throw new Error(j?.error || `HTTP ${r.status}`);
         return j;
       })
-      .then((d) => !cancel && setData(d))
-      .catch((e) => !cancel && setError(e))
-      .finally(() => !cancel && setLoading(false));
-    return () => (cancel = true);
+      .then((d) => setData(d))
+      .catch((e) => setError(e))
+      .finally(() => setLoading(false));
   }, [active]);
 
-  return { ...data, loading, error };
+  useEffect(() => { refresh(); }, [refresh]);
+  return { ...data, loading, error, refresh };
 }
 
 export function useMyClaims(customerId) {
@@ -31,24 +30,29 @@ export function useMyClaims(customerId) {
   const [loading, setLoading] = useState(Boolean(customerId));
   const [error, setError] = useState(null);
 
-  useEffect(() => {
+  const refresh = useCallback(() => {
     if (!customerId) return;
-    let cancel = false;
     setLoading(true);
     setError(null);
     fetch(`/api/rewards/claims?customerId=${encodeURIComponent(customerId)}`)
       .then(async (r) => {
-        const j = await r.json();
-        if (!r.ok) throw new Error(j?.error || `HTTP ${r.status}`);
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          // Normalize “no data” from server route to empty list
+          if (r.status === 404 || r.status === 204 || r.status === 500 || /no data|not found|empty/i.test(j?.error || "")) {
+            return { claims: [] };
+          }
+          throw new Error(j?.error || `HTTP ${r.status}`);
+        }
         return j;
       })
-      .then((d) => !cancel && setData(d))
-      .catch((e) => !cancel && setError(e))
-      .finally(() => !cancel && setLoading(false));
-    return () => (cancel = true);
+      .then((d) => setData(d))
+      .catch((e) => setError(e))
+      .finally(() => setLoading(false));
   }, [customerId]);
 
-  return { ...data, loading, error };
+  useEffect(() => { refresh(); }, [refresh]);
+  return { ...data, loading, error, refresh };
 }
 
 export function useClaimReward() {
@@ -64,7 +68,7 @@ export function useClaimReward() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ customerId, rewardId }),
       });
-      const j = await res.json();
+      const j = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`);
       return j; // { claimId }
     } catch (e) {

@@ -3,10 +3,12 @@
 import { useEffect, useState, useCallback } from "react";
 
 /**
- * Returns a normalized numeric `points` (always a number).
+ * Points are derived from total donations:
+ *   $1 donated = 1 point (lifetime).
+ * This hook returns { points, loading, error, refresh }
+ * where `points` is the *lifetime donated points*.
  */
 export function useLoyaltyPoints(customerId) {
-  // keep `undefined` until we fetch; never keep `null`
   const [points, setPoints] = useState(undefined);
   const [loading, setLoading] = useState(Boolean(customerId));
   const [error, setError] = useState(null);
@@ -15,24 +17,26 @@ export function useLoyaltyPoints(customerId) {
     if (!customerId) return;
     setLoading(true);
     setError(null);
-    fetch(`/api/loyalty/points?customerId=${encodeURIComponent(customerId)}`)
+
+    fetch(`/api/donations/by-customer?customerId=${encodeURIComponent(customerId)}`)
       .then(async (r) => {
-        const j = await r.json();
+        const j = await r.json().catch(() => ({ donations: [] }));
+        // Our server route returns 200 with {donations: []} on "no data"
         if (!r.ok) throw new Error(j?.error || `HTTP ${r.status}`);
-        return j;
+        return j?.donations || [];
       })
-      .then((d) => setPoints(Number(d.points ?? 0)))
+      .then((donations) => {
+        const total = donations.reduce((sum, d) => sum + Number(d.amount || 0), 0);
+        setPoints(total); // lifetime donated points
+      })
       .catch((e) => {
         setError(e);
-        // ensure we still return a number to the UI
         setPoints(0);
       })
       .finally(() => setLoading(false));
   }, [customerId]);
 
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
+  useEffect(() => { refresh(); }, [refresh]);
 
   // Always expose a number
   return { points: points ?? 0, loading, error, refresh };

@@ -15,8 +15,7 @@ import { Badge } from "@/components/ui/badge";
 import { Star, Zap } from "lucide-react";
 import RewardCard from "@/components/rewards/RewardCard";
 import ClaimsTable from "@/components/rewards/ClaimsTable";
-import { ensureCustomerId } from "@/lib/utils";
-import { useRewardsCatalog, useMyClaims } from "@/hooks/useRewards";
+import { useRewardsCatalog, useMyClaims, useClaimReward } from "@/hooks/useRewards";
 import { useLoyaltyPoints } from "@/hooks/useLoyalty";
 
 /* ----- Tier rules (lifetime-based) -----
@@ -26,32 +25,41 @@ import { useLoyaltyPoints } from "@/hooks/useLoyalty";
   >= 3500             -> Gold
 ---------------------------------------- */
 function computeTier(lifetime) {
-  if (lifetime >= 3500)
-    return { name: "Gold", currentMin: 3500, nextMin: null }; // top tier
+  if (lifetime >= 3500) return { name: "Gold", currentMin: 3500, nextMin: null };
   if (lifetime >= 2500) return { name: "Silver", currentMin: 2500, nextMin: 3500 };
   if (lifetime >= 1500) return { name: "Bronze", currentMin: 1500, nextMin: 2500 };
   return { name: "Member", currentMin: 0, nextMin: 1500 };
 }
 
 export default function RewardsPage() {
-  const { user, isAuthenticated } = useAuth();
+  const { getCustomerId } = useAuth();
   const [customerId, setCustomerId] = useState(null);
-  useEffect(() => setCustomerId(ensureCustomerId()), []);
+  useEffect(() => setCustomerId(getCustomerId()), [getCustomerId]);
 
   // Data
   const { rewards, loading: catalogLoading, error: catalogError } = useRewardsCatalog(true);
-  const { claims, loading: claimsLoading, error: claimsError } = useMyClaims(customerId);
-  const { points: currentPoints, loading: pointsLoading, error: pointsError, refresh: refreshPoints } =
-    useLoyaltyPoints(customerId);
+  const { claims, loading: claimsLoading, error: claimsError, refresh: refreshClaims } = useMyClaims(customerId);
 
-  // ----- Lifetime points = current balance + total spent historically -----
+  // Lifetime donated points from Donations (= $ donated)
+  const {
+    points: donatedPoints, // lifetime donated points
+    loading: pointsLoading,
+    error: pointsError,
+    refresh: refreshPoints,
+  } = useLoyaltyPoints(customerId);
+
+  // Total spent (sum of redeemed rewards' point costs)
   const totalSpent = useMemo(
-    () => (Array.isArray(claims) ? claims.reduce((sum, c) => sum + Number(c.pointsCost || 0), 0) : 0),
+    () => (Array.isArray(claims) ? claims.reduce((s, c) => s + Number(c.pointsCost || 0), 0) : 0),
     [claims]
   );
-  const lifetimePoints = (currentPoints ?? 0) + totalSpent;
 
-  // Tier & progress-to-next-tier (based on lifetime, not current balance)
+  // Net balance = donated - spent (never negative)
+  const currentPoints = Math.max((donatedPoints ?? 0) - totalSpent, 0);
+
+  // Lifetime points for tiering/progress = donated (does not decrease on redemption)
+  const lifetimePoints = donatedPoints ?? 0;
+
   const { name: tierName, currentMin, nextMin } = computeTier(lifetimePoints);
   const pointsToNext = nextMin ? Math.max(nextMin - lifetimePoints, 0) : 0;
   const progress = (() => {
@@ -62,7 +70,7 @@ export default function RewardsPage() {
   })();
   const nextTierLabel = nextMin ? (tierName === "Member" ? "Bronze" : tierName === "Bronze" ? "Silver" : "Gold") : "Max";
 
-  // Claim action -> uses orchestrated /api/rewards/redeem (already deducts points in Loyalty)
+  // Claim action – orchestrated via /api/rewards/redeem; on success refresh both
   async function handleClaim(reward) {
     if (!customerId) return;
     const res = await fetch("/api/rewards/redeem", {
@@ -72,24 +80,8 @@ export default function RewardsPage() {
     });
     const j = await res.json();
     if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`);
-    // Refresh balance & history to keep lifetime stable after redemption
-    refreshPoints();
-    window.location.reload(); // simplest way to refetch claims; you can swap for hook-driven refresh
+    await Promise.all([refreshPoints(), refreshClaims()]);
   }
-
-  const getCurrentUser = () => {
-    if (user) {
-      return {
-        id: user.id || user.icNumber,
-        email: user.email,
-        name: user.name,
-        customerData: user.customerData,
-      };
-    }
-    return { id: "guest", email: "guest@example.com" };
-  };
-
-  const [currentUser] = useState(getCurrentUser());
 
   return (
     <div className="min-h-screen bg-background">
@@ -100,11 +92,11 @@ export default function RewardsPage() {
           <div>
             <h1 className="text-3xl font-bold text-foreground">Rewards</h1>
             <p className="text-muted-foreground mt-1">
-              Redeem your points for exclusive rewards
+              Redeem your points for exclusive rewards {customerId ? `(ID ${customerId})` : ""}
             </p>
           </div>
 
-          {/* Lifetime-based Tier & Balance */}
+          {/* Balance & Tier */}
           <Card className="bg-gradient-to-br from-primary/10 via-background to-accent/10 border-primary/20">
             <CardContent className="pt-6">
               <div className="flex flex-col md:flex-row items-center justify-between gap-6">
@@ -113,23 +105,20 @@ export default function RewardsPage() {
                     <Star className="w-8 h-8 text-primary-foreground" />
                   </div>
                   <div>
-                    <p className="text-sm text-muted-foreground">
-                      Your Points Balance
-                    </p>
+                    <p className="text-sm text-muted-foreground">Your Points Balance</p>
                     <p className="text-4xl font-bold text-foreground">
-                      {pointsLoading ? "…" : currentPoints.toLocaleString()}
+                      {pointsLoading ? "…" : (currentPoints || 0).toLocaleString()}
                     </p>
                     {pointsError && (
                       <p className="text-xs text-red-600 mt-1">
-                        Failed to load points:{" "}
-                        {String(pointsError.message || pointsError)}
+                        Failed to compute points from donations: {String(pointsError.message || pointsError)}
                       </p>
                     )}
                     <div className="mt-1 text-xs text-muted-foreground">
-                      Lifetime points:{" "}
-                      <span className="font-medium">
-                        {lifetimePoints.toLocaleString()}
-                      </span>
+                      Lifetime points (donated):{" "}
+                      <span className="font-medium">{(lifetimePoints || 0).toLocaleString()}</span>
+                      {" • "}
+                      Spent: <span className="font-medium">{(totalSpent || 0).toLocaleString()}</span>
                     </div>
                   </div>
                 </div>
@@ -137,8 +126,7 @@ export default function RewardsPage() {
                 <div className="flex-1 max-w-md w-full">
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-sm font-medium">
-                      Progress to{" "}
-                      {nextMin ? `${nextTierLabel} Tier` : "Top Tier"}
+                      Progress to {nextMin ? `${nextTierLabel} Tier` : "Top Tier"}
                     </span>
                     <span className="text-sm text-muted-foreground">
                       {pointsToNext.toLocaleString()} points to go
@@ -149,7 +137,7 @@ export default function RewardsPage() {
                     <Badge variant="secondary">{tierName} Tier</Badge>
                     <Zap className="w-4 h-4 text-muted-foreground" />
                     <span className="text-xs text-muted-foreground">
-                      Tiers are based on lifetime points, not current balance
+                      Tiers are based on lifetime points (total donated), not current balance
                     </span>
                   </div>
                 </div>
@@ -161,19 +149,14 @@ export default function RewardsPage() {
           <Card>
             <CardHeader>
               <CardTitle>Available Rewards</CardTitle>
-              <CardDescription>
-                Choose from our selection of eco-friendly rewards
-              </CardDescription>
+              <CardDescription>Choose from our selection of eco-friendly rewards</CardDescription>
             </CardHeader>
             <CardContent>
               {catalogLoading ? (
-                <div className="p-6 text-sm text-muted-foreground">
-                  Loading catalog…
-                </div>
+                <div className="p-6 text-sm text-muted-foreground">Loading catalog…</div>
               ) : catalogError ? (
                 <div className="p-6 text-sm text-red-600">
-                  Failed to load catalog:{" "}
-                  {String(catalogError.message || catalogError)}
+                  Failed to load catalog: {String(catalogError.message || catalogError)}
                 </div>
               ) : rewards.length ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -183,6 +166,7 @@ export default function RewardsPage() {
                       reward={reward}
                       currentPoints={currentPoints}
                       onClaim={handleClaim}
+                      claiming={false}
                     />
                   ))}
                 </div>
@@ -198,15 +182,11 @@ export default function RewardsPage() {
           <Card>
             <CardHeader>
               <CardTitle>My Claimed Rewards</CardTitle>
-              <CardDescription>
-                Everything you’ve redeemed so far
-              </CardDescription>
+              <CardDescription>Everything you’ve redeemed so far</CardDescription>
             </CardHeader>
             <CardContent>
               {claimsLoading ? (
-                <div className="p-6 text-sm text-muted-foreground">
-                  Loading your claims…
-                </div>
+                <div className="p-6 text-sm text-muted-foreground">Loading your claims…</div>
               ) : claimsError ? (
                 <div className="p-6 text-sm text-red-600">
                   Failed to load claims: {String(claimsError.message || claimsError)}
