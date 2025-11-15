@@ -8,7 +8,9 @@ import {
   getDepositBalance,
   getTransactionHistory,
   processTransaction,
-  getTransactionCategories, 
+  getTransactionCategories,
+  depositCash,
+  withdrawCash,
 } from "@/lib/account-api";
 
 export default function AccountsPage() {
@@ -32,13 +34,23 @@ export default function AccountsPage() {
   // Local map: transactionId -> MerchantCategory (for UI-created txns)
   const [categoryMap, setCategoryMap] = useState({});
 
-  // Form state for ProcessTxn
+  // Form state for ProcessTxn (transfers only)
   const [receivingAcctId, setReceivingAcctId] = useState("");
   const [amount, setAmount] = useState("");
   const [category, setCategory] = useState("Transport");
   const [formError, setFormError] = useState("");
   const [formSuccess, setFormSuccess] = useState("");
   const [submitting, setSubmitting] = useState(false);
+
+  // Deposit / withdraw controls
+  const [depositAmount, setDepositAmount] = useState("");
+  const [withdrawAmount, setWithdrawAmount] = useState("");
+  const [depositLoading, setDepositLoading] = useState(false);
+  const [withdrawLoading, setWithdrawLoading] = useState(false);
+  const [depositMessage, setDepositMessage] = useState("");
+  const [withdrawMessage, setWithdrawMessage] = useState("");
+  const [depositError, setDepositError] = useState("");
+  const [withdrawError, setWithdrawError] = useState("");
 
   // Load saved category map from localStorage
   useEffect(() => {
@@ -97,7 +109,7 @@ export default function AccountsPage() {
     }
 
     loadBalance();
-  }, [customerId, accountId, hasAccount]);
+  }, [customerId, accountId, hasAccount, reloadToken]);
 
   // Fetch transactions when IDs, date or reloadToken change
   useEffect(() => {
@@ -115,55 +127,54 @@ export default function AccountsPage() {
     }
 
     async function loadTransactions() {
-  try {
-    setLoadingTx(true);
-    setTxError("");
+      try {
+        setLoadingTx(true);
+        setTxError("");
 
-    const txs = await getTransactionHistory(accountId, startDate, endDate);
+        const txs = await getTransactionHistory(accountId, startDate, endDate);
 
-    // Sort newest → oldest
-    const sorted = [...txs].sort((a, b) => {
-      const da = new Date(a.transactionDate || 0).getTime();
-      const db = new Date(b.transactionDate || 0).getTime();
-      return db - da;
-    });
+        // Sort newest → oldest
+        const sorted = [...txs].sort((a, b) => {
+          const da = new Date(a.transactionDate || 0).getTime();
+          const db = new Date(b.transactionDate || 0).getTime();
+          return db - da;
+        });
 
-    // 🔎 Ask our backend for known categories for these transactionIds
-    const ids = sorted
-      .map((tx) => tx.transactionId)
-      .filter(Boolean);
+        // Ask our backend for known categories (if implemented)
+        const ids = sorted
+          .map((tx) => tx.transactionId)
+          .filter(Boolean);
 
-    let serverCategories = {};
-    try {
-      serverCategories = await getTransactionCategories(ids);
-    } catch (e) {
-      console.warn("Failed to load server categories", e);
+        let serverCategories = {};
+        try {
+          serverCategories = await getTransactionCategories(ids);
+        } catch (e) {
+          console.warn("Failed to load server categories", e);
+        }
+
+        // Merge everything into a single MerchantCategory field
+        const enhanced = sorted.map((tx) => {
+          const tid = tx.transactionId;
+          return {
+            ...tx,
+            MerchantCategory:
+              tx.MerchantCategory || // from API if ever present
+              tx.merchantCategory || // any variant
+              serverCategories[tid] || // from Node store
+              categoryMap[tid] || // localStorage fallback
+              null,
+          };
+        });
+
+        setTransactions(enhanced);
+      } catch (err) {
+        console.error("Transactions fetch error:", err);
+        setTxError(err.message || "Failed to load transactions");
+        setTransactions([]);
+      } finally {
+        setLoadingTx(false);
+      }
     }
-
-    // Merge everything into a single MerchantCategory field
-    const enhanced = sorted.map((tx) => {
-      const tid = tx.transactionId;
-      return {
-        ...tx,
-        MerchantCategory:
-          tx.MerchantCategory ||                   // from API if ever present
-          tx.merchantCategory ||                   // any variant
-          serverCategories[tid] ||                 // 👈 from our Node store
-          categoryMap[tid] ||                      // localStorage fallback
-          null,
-      };
-    });
-
-    setTransactions(enhanced);
-  } catch (err) {
-    console.error("Transactions fetch error:", err);
-    setTxError(err.message || "Failed to load transactions");
-    setTransactions([]);
-  } finally {
-    setLoadingTx(false);
-  }
-}
-
 
     loadTransactions();
   }, [accountId, hasAccount, startDate, endDate, reloadToken, categoryMap]);
@@ -200,7 +211,15 @@ export default function AccountsPage() {
     });
   };
 
-  // Handle ProcessTxn form submit
+  // Payment mode: Digital for deposit/withdraw, else whatever tBank returns / Cash
+  const renderPaymentMode = (tx) => {
+    const cat = tx.MerchantCategory;
+    const isDepositOrWithdrawal = cat === "Deposit" || cat === "Withdrawal";
+    if (isDepositOrWithdrawal) return "Digital";
+    return tx.paymentMode || "Cash";
+  };
+
+  // Handle ProcessTxn form submit (transfers)
   const handleSubmit = async (e) => {
     e.preventDefault();
     setFormError("");
@@ -248,13 +267,104 @@ export default function AccountsPage() {
         `Transaction successful (ID: ${txn?.transactionId || "unknown"})`
       );
       setAmount("");
-      // Optionally keep receivingAcctId & category
-      setReloadToken((t) => t + 1); // reload history
+      setReloadToken((t) => t + 1); // reload history & balance
     } catch (err) {
       console.error("ProcessTxn error:", err);
       setFormError(err.message || "Failed to process transaction.");
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  // Handle DepositCash
+  const handleDeposit = async () => {
+    setDepositError("");
+    setDepositMessage("");
+
+    if (!hasAccount) {
+      setDepositError("No deposit account available for this user.");
+      return;
+    }
+
+    const amt = Number(depositAmount);
+    if (!amt || amt <= 0) {
+      setDepositError("Enter a valid deposit amount.");
+      return;
+    }
+
+    try {
+      setDepositLoading(true);
+      const result = await depositCash({
+        customerId,
+        accountId,
+        amount: amt,
+        narrative: "Deposit",
+      });
+
+      if (result?.transactionId) {
+        const next = {
+          ...categoryMap,
+          [result.transactionId]: "Deposit",
+        };
+        persistCategoryMap(next);
+      }
+
+      setDepositMessage(
+        `Deposit successful (Txn ID: ${result?.transactionId || "unknown"})`
+      );
+      setDepositAmount("");
+      setReloadToken((t) => t + 1);
+    } catch (err) {
+      console.error("Deposit error:", err);
+      setDepositError(err.message || "Deposit failed.");
+    } finally {
+      setDepositLoading(false);
+    }
+  };
+
+  // Handle WithdrawCash
+  const handleWithdraw = async () => {
+    setWithdrawError("");
+    setWithdrawMessage("");
+
+    if (!hasAccount) {
+      setWithdrawError("No deposit account available for this user.");
+      return;
+    }
+
+    const amt = Number(withdrawAmount);
+    if (!amt || amt <= 0) {
+      setWithdrawError("Enter a valid withdrawal amount.");
+      return;
+    }
+
+    try {
+      setWithdrawLoading(true);
+      const result = await withdrawCash({
+        customerId,
+        accountId,
+        amount: amt,
+        narrative: "Withdrawal",
+      });
+
+      if (result?.transactionId) {
+        const next = {
+          ...categoryMap,
+          [result.transactionId]: "Withdrawal",
+        };
+        persistCategoryMap(next);
+      }
+
+      setWithdrawMessage(
+        `Withdrawal successful (Txn ID: ${result?.transactionId || "unknown"})`
+      );
+      setWithdrawAmount("");
+      setReloadToken((t) => t + 1);
+    } catch (err) {
+      console.error("Withdraw error:", err);
+      setWithdrawError(err.message || "Withdrawal failed.");
+    } finally {
+      setWithdrawLoading(false);
     }
   };
 
@@ -268,6 +378,93 @@ export default function AccountsPage() {
           <p className="text-muted-foreground">
             Overview of your GreenBankr deposit account
           </p>
+
+          {/* Deposit / Withdraw controls */}
+          {hasAccount && (
+            <>
+              <div className="flex flex-col md:flex-row md:items-end md:justify-end gap-4">
+                {/* Deposit */}
+                <div className="flex flex-col md:flex-row gap-2 items-end">
+                  <div className="flex flex-col">
+                    <label
+                      htmlFor="depositAmount"
+                      className="text-sm text-muted-foreground mb-1"
+                    >
+                      Deposit amount (SGD)
+                    </label>
+                    <input
+                      id="depositAmount"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      className="border rounded px-2 py-1 bg-background text-sm placeholder:text-muted-foreground w-full md:w-32"
+                      value={depositAmount}
+                      onChange={(e) => setDepositAmount(e.target.value)}
+                      placeholder="e.g. 100"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleDeposit}
+                    disabled={depositLoading}
+                    className="inline-flex items-center px-3 py-2 rounded-md text-sm font-medium border bg-foreground text-background hover:opacity-90 disabled:opacity-50"
+                  >
+                    {depositLoading ? "Depositing..." : "Deposit"}
+                  </button>
+                </div>
+
+                {/* Withdraw */}
+                <div className="flex flex-col md:flex-row gap-2 items-end">
+                  <div className="flex flex-col">
+                    <label
+                      htmlFor="withdrawAmount"
+                      className="text-sm text-muted-foreground mb-1"
+                    >
+                      Withdraw amount (SGD)
+                    </label>
+                    <input
+                      id="withdrawAmount"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      className="border rounded px-2 py-1 bg-background text-sm placeholder:text-muted-foreground w-full md:w-32"
+                      value={withdrawAmount}
+                      onChange={(e) => setWithdrawAmount(e.target.value)}
+                      placeholder="e.g. 50"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleWithdraw}
+                    disabled={withdrawLoading}
+                    className="inline-flex items-center px-3 py-2 rounded-md text-sm font-medium border bg-background text-foreground hover:bg-muted disabled:opacity-50"
+                  >
+                    {withdrawLoading ? "Withdrawing..." : "Withdraw"}
+                  </button>
+                </div>
+              </div>
+
+              {(depositMessage ||
+                depositError ||
+                withdrawMessage ||
+                withdrawError) && (
+                <div className="text-sm">
+                  {depositMessage && (
+                    <p className="text-emerald-600 mb-1">{depositMessage}</p>
+                  )}
+                  {depositError && (
+                    <p className="text-red-600 mb-1">{depositError}</p>
+                  )}
+                  {withdrawMessage && (
+                    <p className="text-emerald-600 mb-1">{withdrawMessage}</p>
+                  )}
+                  {withdrawError && (
+                    <p className="text-red-600 mb-1">{withdrawError}</p>
+                  )}
+                </div>
+              )}
+            </>
+          )}
 
           {/* Balance card */}
           <Card>
@@ -298,7 +495,7 @@ export default function AccountsPage() {
             </CardContent>
           </Card>
 
-          {/* Process Transaction form */}
+          {/* Process Transaction form (transfers only) */}
           <Card>
             <CardHeader>
               <CardTitle>New Transaction</CardTitle>
@@ -369,8 +566,6 @@ export default function AccountsPage() {
                         <option value="Groceries">Groceries</option>
                         <option value="Transport">Transport</option>
                         <option value="Bills">Bills</option>
-                        <option value="Withdrawal">Withdrawal</option>
-                        <option value="Deposit">Deposit</option>
                         <option value="Others">Others</option>
                       </select>
                     </div>
@@ -478,7 +673,7 @@ export default function AccountsPage() {
                           </span>
                           {renderAmount(tx)}
                           <span>{tx.currency || "SGD"}</span>
-                          <span>{tx.paymentMode || "Cash"}</span>
+                          <span>{renderPaymentMode(tx)}</span>
                           <span>{tx.MerchantCategory || "—"}</span>
                         </div>
                       ))}
