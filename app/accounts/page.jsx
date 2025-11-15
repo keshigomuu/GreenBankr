@@ -4,7 +4,12 @@ import { useEffect, useState } from "react";
 import { Navigation } from "@/components/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useAuth } from "@/contexts/auth-context";
-import { getDepositBalance, getTransactionHistory } from "@/lib/account-api";
+import {
+  getDepositBalance,
+  getTransactionHistory,
+  processTransaction,
+  getTransactionCategories, 
+} from "@/lib/account-api";
 
 export default function AccountsPage() {
   const { user, getCustomerId, getDepositAccount } = useAuth();
@@ -16,14 +21,46 @@ export default function AccountsPage() {
   const [loadingBalance, setLoadingBalance] = useState(true);
   const [balanceError, setBalanceError] = useState("");
 
-  // Transactions state
+  // Transaction history state
   const [startDate, setStartDate] = useState("2020-12-31");
   const [endDate, setEndDate] = useState("2025-12-31");
   const [transactions, setTransactions] = useState([]);
   const [loadingTx, setLoadingTx] = useState(true);
   const [txError, setTxError] = useState("");
+  const [reloadToken, setReloadToken] = useState(0);
 
-  // Resolve IDs from context once user is available
+  // Local map: transactionId -> MerchantCategory (for UI-created txns)
+  const [categoryMap, setCategoryMap] = useState({});
+
+  // Form state for ProcessTxn
+  const [receivingAcctId, setReceivingAcctId] = useState("");
+  const [amount, setAmount] = useState("");
+  const [category, setCategory] = useState("Transport");
+  const [formError, setFormError] = useState("");
+  const [formSuccess, setFormSuccess] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  // Load saved category map from localStorage
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const saved = localStorage.getItem("txnCategories");
+      if (saved) {
+        setCategoryMap(JSON.parse(saved));
+      }
+    } catch (e) {
+      console.warn("Failed to parse txnCategories from localStorage", e);
+    }
+  }, []);
+
+  const persistCategoryMap = (next) => {
+    setCategoryMap(next);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("txnCategories", JSON.stringify(next));
+    }
+  };
+
+  // Resolve IDs from auth context
   useEffect(() => {
     const cid = getCustomerId?.() ?? user?.customerId ?? null;
     const acc =
@@ -32,15 +69,15 @@ export default function AccountsPage() {
       user?.raw?.DepositeAcct ??
       "";
 
-    console.log("AccountsPage IDs:", { cid, acc, user });
-
     setCustomerId(cid);
     setAccountId(acc);
   }, [user, getCustomerId, getDepositAccount]);
 
+  const hasAccount = !!customerId && !!accountId;
+
   // Fetch balance when IDs are ready
   useEffect(() => {
-    if (!customerId || !accountId) {
+    if (!hasAccount) {
       setLoadingBalance(false);
       return;
     }
@@ -60,17 +97,16 @@ export default function AccountsPage() {
     }
 
     loadBalance();
-  }, [customerId, accountId]);
+  }, [customerId, accountId, hasAccount]);
 
-  // Fetch transactions when IDs or date range change
+  // Fetch transactions when IDs, date or reloadToken change
   useEffect(() => {
-    if (!customerId || !accountId) {
+    if (!hasAccount) {
       setLoadingTx(false);
       setTransactions([]);
       return;
     }
 
-    // simple validation: don't call API if dates invalid
     if (!startDate || !endDate || startDate > endDate) {
       setTxError("Please choose a valid start/end date range.");
       setTransactions([]);
@@ -79,45 +115,75 @@ export default function AccountsPage() {
     }
 
     async function loadTransactions() {
-      try {
-        setLoadingTx(true);
-        setTxError("");
-        const txs = await getTransactionHistory(accountId, startDate, endDate);
+  try {
+    setLoadingTx(true);
+    setTxError("");
 
-        // sort newest → oldest by transactionDate
-        const sorted = [...txs].sort((a, b) => {
-          const da = new Date(a.transactionDate || 0).getTime();
-          const db = new Date(b.transactionDate || 0).getTime();
-          return db - da;
-        });
+    const txs = await getTransactionHistory(accountId, startDate, endDate);
 
-        setTransactions(sorted);
-      } catch (err) {
-        console.error("Transactions fetch error:", err);
-        setTxError(err.message || "Failed to load transactions");
-        setTransactions([]);
-      } finally {
-        setLoadingTx(false);
-      }
+    // Sort newest → oldest
+    const sorted = [...txs].sort((a, b) => {
+      const da = new Date(a.transactionDate || 0).getTime();
+      const db = new Date(b.transactionDate || 0).getTime();
+      return db - da;
+    });
+
+    // 🔎 Ask our backend for known categories for these transactionIds
+    const ids = sorted
+      .map((tx) => tx.transactionId)
+      .filter(Boolean);
+
+    let serverCategories = {};
+    try {
+      serverCategories = await getTransactionCategories(ids);
+    } catch (e) {
+      console.warn("Failed to load server categories", e);
     }
 
+    // Merge everything into a single MerchantCategory field
+    const enhanced = sorted.map((tx) => {
+      const tid = tx.transactionId;
+      return {
+        ...tx,
+        MerchantCategory:
+          tx.MerchantCategory ||                   // from API if ever present
+          tx.merchantCategory ||                   // any variant
+          serverCategories[tid] ||                 // 👈 from our Node store
+          categoryMap[tid] ||                      // localStorage fallback
+          null,
+      };
+    });
+
+    setTransactions(enhanced);
+  } catch (err) {
+    console.error("Transactions fetch error:", err);
+    setTxError(err.message || "Failed to load transactions");
+    setTransactions([]);
+  } finally {
+    setLoadingTx(false);
+  }
+}
+
+
     loadTransactions();
-  }, [customerId, accountId, startDate, endDate]);
+  }, [accountId, hasAccount, startDate, endDate, reloadToken, categoryMap]);
 
-  // Helper: format transaction amount with + / − and colour
+  // Helper: format amount with + / - and colour
   const renderAmount = (tx) => {
-    const amt = Number(tx.transactionAmount || 0);
+    const amt = Number(tx.transactionAmount || tx.txnAmt || 0);
 
-    // Treat as credit if this account is the destination OR type 200 (deposit)
     const isCredit =
-      tx.accountTo === accountId || String(tx.transactionType) === "200";
+      tx.accountTo === accountId ||
+      String(tx.transactionType) === "200" ||
+      tx.Recieving_Acct_Id === accountId;
 
     const sign = isCredit ? "+" : "-";
     const display = `${sign}$${Math.abs(amt).toFixed(2)}`;
-
     const colourClass = isCredit ? "text-green-600" : "text-red-600";
 
-    return <span className={`text-right font-semibold ${colourClass}`}>{display}</span>;
+    return (
+      <span className={`text-right font-semibold ${colourClass}`}>{display}</span>
+    );
   };
 
   const formatDateTime = (iso) => {
@@ -134,7 +200,63 @@ export default function AccountsPage() {
     });
   };
 
-  const hasAccount = !!customerId && !!accountId;
+  // Handle ProcessTxn form submit
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setFormError("");
+    setFormSuccess("");
+
+    if (!hasAccount) {
+      setFormError("No deposit account available for this user.");
+      return;
+    }
+    if (!receivingAcctId) {
+      setFormError("Please enter the receiving account ID.");
+      return;
+    }
+    const amtNum = Number(amount);
+    if (!amtNum || amtNum <= 0) {
+      setFormError("Please enter a valid amount greater than 0.");
+      return;
+    }
+    if (!category) {
+      setFormError("Please select a merchant category.");
+      return;
+    }
+
+    try {
+      setSubmitting(true);
+
+      const txn = await processTransaction({
+        customerId,
+        custAcctId: accountId,
+        receivingAcctId,
+        amount: amtNum,
+        category,
+      });
+
+      // Save category mapping by transactionId
+      if (txn?.transactionId && txn?.MerchantCategory) {
+        const nextMap = {
+          ...categoryMap,
+          [txn.transactionId]: txn.MerchantCategory,
+        };
+        persistCategoryMap(nextMap);
+      }
+
+      setFormSuccess(
+        `Transaction successful (ID: ${txn?.transactionId || "unknown"})`
+      );
+      setAmount("");
+      // Optionally keep receivingAcctId & category
+      setReloadToken((t) => t + 1); // reload history
+    } catch (err) {
+      console.error("ProcessTxn error:", err);
+      setFormError(err.message || "Failed to process transaction.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-background">
@@ -173,6 +295,103 @@ export default function AccountsPage() {
               <p className="mt-2 text-sm text-muted-foreground">
                 Account ID: {accountId || "—"}
               </p>
+            </CardContent>
+          </Card>
+
+          {/* Process Transaction form */}
+          <Card>
+            <CardHeader>
+              <CardTitle>New Transaction</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {!hasAccount ? (
+                <p className="text-muted-foreground">
+                  No deposit account available to create transactions.
+                </p>
+              ) : (
+                <form
+                  onSubmit={handleSubmit}
+                  className="space-y-4 max-w-xl"
+                  noValidate
+                >
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="flex flex-col">
+                      <label className="text-sm text-muted-foreground mb-1">
+                        From account
+                      </label>
+                      <input
+                        type="text"
+                        value={accountId}
+                        disabled
+                        className="border rounded px-2 py-1 bg-muted text-sm cursor-not-allowed"
+                      />
+                    </div>
+                    <div className="flex flex-col">
+                      <label className="text-sm text-muted-foreground mb-1">
+                        To account
+                      </label>
+                      <input
+                        type="text"
+                        className="border rounded px-2 py-1 bg-background text-sm placeholder:text-muted-foreground"
+                        value={receivingAcctId}
+                        onChange={(e) => setReceivingAcctId(e.target.value)}
+                        placeholder="0000005954"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="flex flex-col">
+                      <label className="text-sm text-muted-foreground mb-1">
+                        Amount (SGD)
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        className="border rounded px-2 py-1 bg-background text-sm placeholder:text-muted-foreground"
+                        value={amount}
+                        onChange={(e) => setAmount(e.target.value)}
+                        placeholder="3.00"
+                      />
+                    </div>
+                    <div className="flex flex-col">
+                      <label className="text-sm text-muted-foreground mb-1">
+                        Category
+                      </label>
+                      <select
+                        className="border rounded px-2 py-1 bg-background text-sm"
+                        value={category}
+                        onChange={(e) => setCategory(e.target.value)}
+                      >
+                        <option value="Food">Food</option>
+                        <option value="Shopping">Shopping</option>
+                        <option value="Groceries">Groceries</option>
+                        <option value="Transport">Transport</option>
+                        <option value="Bills">Bills</option>
+                        <option value="Withdrawal">Withdrawal</option>
+                        <option value="Deposit">Deposit</option>
+                        <option value="Others">Others</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {formError && (
+                    <p className="text-sm text-red-500">{formError}</p>
+                  )}
+                  {formSuccess && (
+                    <p className="text-sm text-green-600">{formSuccess}</p>
+                  )}
+
+                  <button
+                    type="submit"
+                    disabled={submitting}
+                    className="inline-flex items-center px-4 py-2 rounded-md text-sm font-medium border bg-foreground text-background hover:opacity-90 disabled:opacity-50"
+                  >
+                    {submitting ? "Processing..." : "Submit Transaction"}
+                  </button>
+                </form>
+              )}
             </CardContent>
           </Card>
 
@@ -215,7 +434,7 @@ export default function AccountsPage() {
                     <div className="flex-1 flex items-end text-sm text-muted-foreground">
                       <span>
                         Transactions auto-refresh when you change the date
-                        range.
+                        range or create a new transaction.
                       </span>
                     </div>
                   </div>
@@ -235,30 +454,32 @@ export default function AccountsPage() {
                   ) : (
                     <div className="space-y-1">
                       {/* header row */}
-                      <div className="grid grid-cols-6 gap-2 text-xs font-medium text-muted-foreground border-b pb-1">
+                      <div className="grid grid-cols-7 gap-2 text-xs font-medium text-muted-foreground border-b pb-1">
                         <span>Date / Time</span>
                         <span>From</span>
                         <span>To</span>
                         <span className="text-right">Amount</span>
                         <span>Currency</span>
                         <span>Payment Mode</span>
+                        <span>Category</span>
                       </div>
 
                       {transactions.map((tx) => (
                         <div
                           key={tx.transactionId}
-                          className="grid grid-cols-6 gap-2 text-sm py-2 border-b last:border-b-0"
+                          className="grid grid-cols-7 gap-2 text-sm py-2 border-b last:border-b-0"
                         >
                           <span>{formatDateTime(tx.transactionDate)}</span>
                           <span className="truncate">
-                            {tx.accountFrom || "—"}
+                            {tx.accountFrom || tx.Cust_Acct_Id || "—"}
                           </span>
                           <span className="truncate">
-                            {tx.accountTo || "—"}
+                            {tx.accountTo || tx.Recieving_Acct_Id || "—"}
                           </span>
                           {renderAmount(tx)}
-                          <span>{tx.currency || "—"}</span>
-                          <span>{tx.paymentMode || "—"}</span>
+                          <span>{tx.currency || "SGD"}</span>
+                          <span>{tx.paymentMode || "Cash"}</span>
+                          <span>{tx.MerchantCategory || "—"}</span>
                         </div>
                       ))}
                     </div>
