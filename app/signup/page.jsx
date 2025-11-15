@@ -48,7 +48,10 @@ export default function SignupPage() {
     customerType: "100",
     annualSalary: 0,
     Preference: false,
-    DonationOrg: ""
+    DonationOrg: "",
+    // Donation preference UI state
+    wantToDonate: false,
+    selectedOrganization: ""
   });
 
   useEffect(() => {
@@ -142,15 +145,22 @@ export default function SignupPage() {
     setLoading(true);
 
     try {
+      // Helper to derive a stable id from varied API fields
+      const deriveId = (o) => String(
+        o?.id ?? o?.organisationId ?? o?.OrganisationId ?? o?.name ?? o?.organisationName ?? o?.Name ?? ""
+      );
+      const deriveName = (o) => (
+        o?.name ?? o?.organisationName ?? o?.Name ?? "Organisation"
+      );
+
       // Set donation preference and org
       let donationPreference = false;
       let donationOrg = "";
       
       if (form.wantToDonate && form.selectedOrganization) {
         donationPreference = true;
-        // Find org name by id
-        const selectedOrg = orgs.find(o => String(o.id) === String(form.selectedOrganization));
-        donationOrg = selectedOrg ? selectedOrg.name : form.selectedOrganization;
+        const selectedOrg = orgs.find(o => deriveId(o) === String(form.selectedOrganization));
+        donationOrg = selectedOrg ? deriveName(selectedOrg) : form.selectedOrganization;
       }
 
       // Prepare payload for API
@@ -421,16 +431,22 @@ export default function SignupPage() {
                           <SelectValue placeholder="Select an organization" />
                         </SelectTrigger>
                         <SelectContent>
-                          {orgs.map((org) => (
-                            <SelectItem key={org.id} value={String(org.id)}>
-                              <div className="flex items-center gap-2">
-                                {org.logo && (
-                                  <img src={org.logo} alt="logo" className="h-4 w-4 rounded-full" />
-                                )}
-                                {org.name}
-                              </div>
-                            </SelectItem>
-                          ))}
+                          {orgs.map((org, idx) => {
+                            const oid = String(
+                              org.id ?? org.organisationId ?? org.OrganisationId ?? org.name ?? org.organisationName ?? org.Name ?? idx + 1
+                            );
+                            const name = org.name ?? org.organisationName ?? org.Name ?? `Organisation ${idx + 1}`;
+                            return (
+                              <SelectItem key={oid} value={oid}>
+                                <div className="flex items-center gap-2">
+                                  {org.logo && (
+                                    <img src={org.logo} alt="logo" className="h-4 w-4 rounded-full" />
+                                  )}
+                                  {name}
+                                </div>
+                              </SelectItem>
+                            );
+                          })}
                         </SelectContent>
                       </Select>
                     )}
