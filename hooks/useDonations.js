@@ -71,3 +71,19 @@ export function useAddDonation() {
 
   return { add, loading, error };
 }
+
+export function useOrganisations() {
+  const [orgs, setOrgs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    fetch("/api/organisations")
+      .then((r) => r.json())
+      .then((d) => setOrgs(d?.organisations || []))
+      .catch((e) => setError(e))
+      .finally(() => setLoading(false));
+  }, []);
+
+  return { orgs, loading, error };
+}

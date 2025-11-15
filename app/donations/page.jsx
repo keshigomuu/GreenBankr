@@ -1,48 +1,214 @@
+// === FINAL FIXED VERSION (page.jsx) ===
+
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Navigation } from "@/components/navigation";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Heart, TreePine, Droplet, Wind, Users } from "lucide-react";
-import { useAuth } from "@/contexts/auth-context";
-import { useDonationsByCustomer, useAddDonation } from "@/hooks/useDonations";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Heart, Settings2 } from "lucide-react";
+import { useAuth } from "../../contexts/auth-context";
 
-const organizations = [
-  { id: 1, name: "Ocean Cleanup Initiative", icon: Droplet, category: "Environment" },
-  { id: 2, name: "Reforestation Project", icon: TreePine, category: "Climate" },
-  { id: 3, name: "Clean Air Campaign", icon: Wind, category: "Environment" },
-  { id: 4, name: "Community Gardens", icon: Users, category: "Community" },
-];
+import { useDonationsByCustomer, useAddDonation } from "@/hooks/useDonations";
+import {
+  useDonationPreference,
+  savePreference,
+} from "@/hooks/useDonationPreference";
 
 export default function DonationsPage() {
   const { getCustomerId } = useAuth();
-  const customerId = getCustomerId(); // e.g. "0000002737"
+  const customerId = getCustomerId();
 
-  // Load donation history for this exact id
-  const { donations, loading, error, refresh } = useDonationsByCustomer(customerId);
-
-  // Donate form
   const [orgId, setOrgId] = useState("");
   const [amount, setAmount] = useState("");
-  const { add, loading: adding, error: addError } = useAddDonation();
 
-  const totalDonated = useMemo(
-    () => (Array.isArray(donations) ? donations.reduce((s, d) => s + Number(d.amount || 0), 0) : 0),
-    [donations]
-  );
+  const [showPrefModal, setShowPrefModal] = useState(false);
+  const [prefOrgId, setPrefOrgId] = useState("");
 
+  const [orgs, setOrgs] = useState([]);
+  const [orgsError, setOrgsError] = useState("");
+
+  const { donations, refresh: refreshDonations } =
+    useDonationsByCustomer(customerId);
+  const { add: addDonation } = useAddDonation();
+
+  const { pref, refresh: refreshPref } = useDonationPreference(customerId);
+
+  // ============================================================
+  // FINAL ROBUST ORGANISATION NAME MATCHING
+  // ============================================================
+  function normalise(str) {
+    return String(str || "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .toLowerCase();
+  }
+
+  function mapPrefNameToId(pref, orgs) {
+    if (!pref || !pref.Organization || !orgs?.length) return "";
+
+    const prefNameRaw = pref.Organization;
+    const prefName = normalise(prefNameRaw);
+
+    if (!prefName) return "";
+
+    // 1) Exact match
+    let match = orgs.find(
+      (o) => normalise(o.Name) === prefName
+    );
+    if (match) return String(match.OrganisationId);
+
+    // 2) Contains
+    match = orgs.find(
+      (o) =>
+        normalise(o.Name).includes(prefName) ||
+        prefName.includes(normalise(o.Name))
+    );
+    if (match) return String(match.OrganisationId);
+
+    // 3) Starts-with match
+    match = orgs.find(
+      (o) =>
+        normalise(o.Name).startsWith(prefName) ||
+        prefName.startsWith(normalise(o.Name))
+    );
+    if (match) return String(match.OrganisationId);
+
+    console.warn(
+      "⚠️ Could not map OutSystems preference name → organisationId\n",
+      "Returned name:", prefNameRaw,
+      "\nAvailable organisations:", orgs.map(o => o.Name)
+    );
+
+    return "";
+  }
+
+  // Helper: stable date formatting (no locale-based mismatch)
+  function formatDate(value) {
+    if (!value) return "";
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return "";
+    // Use ISO date (YYYY-MM-DD) so SSR and client match
+    return d.toISOString().split("T")[0];
+  }
+
+  // ============================================================
+  // LOAD ORGANISATIONS
+  // ============================================================
+  useEffect(() => {
+    const loadOrgs = async () => {
+      try {
+        const res = await fetch("/api/organisations");
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Failed to load organisations");
+
+        const uniq = [];
+        const seen = new Set();
+
+        for (const o of data.organisations || []) {
+          if (!seen.has(o.OrganisationId)) {
+            seen.add(o.OrganisationId);
+            uniq.push(o);
+          }
+        }
+
+        setOrgs(uniq);
+      } catch (err) {
+        setOrgsError(err.message);
+      }
+    };
+
+    loadOrgs();
+  }, []);
+
+  // ============================================================
+  // APPLY SAVED PREFERENCE AFTER REFRESH
+  // ============================================================
+  useEffect(() => {
+    if (!pref || !orgs.length) return;
+
+    const mappedId = mapPrefNameToId(pref, orgs);
+
+    // ✔ Only overwrite if mapping succeeds
+    if (mappedId) {
+      setOrgId(mappedId);
+      setPrefOrgId(mappedId);
+    } else {
+      console.warn(
+        "⚠️ Preference mapping failed — keeping existing dropdown selection."
+      );
+    }
+  }, [pref, orgs]);
+
+  // ============================================================
+  // DONATE
+  // ============================================================
   const onDonate = async (e) => {
     e.preventDefault();
     if (!customerId || !orgId || !amount) return;
-    await add({ customerId, orgId: parseInt(orgId, 10), amount: Number(amount) });
+
+    await addDonation({
+      customerId,
+      orgId: parseInt(orgId, 10),
+      amount: Number(amount),
+    });
+
     setAmount("");
-    setOrgId("");
-    refresh();
+    refreshDonations();
   };
+
+  // ============================================================
+  // SAVE PREFERENCE
+  // ============================================================
+  const onSavePreference = async () => {
+    if (!customerId || !prefOrgId) return;
+
+    // Find the selected organisation's NAME by id
+    const selectedOrg = orgs.find(
+      (o) => String(o.OrganisationId) === String(prefOrgId)
+    );
+    const orgName = selectedOrg?.Name || "";
+
+    await savePreference({
+      customerId,
+      preference: "Yes",
+      organization: orgName,
+      hasExisting: !!pref,
+    });
+
+    // Optimistically update dropdown and modal selection
+    setOrgId(prefOrgId);
+    setPrefOrgId(prefOrgId);
+
+    setShowPrefModal(false);
+
+    // We do NOT immediately refresh preference from backend here
+    // to avoid flickering back to any stale value. On the next
+    // page load, the saved preference will be applied via GET.
+  };
+
+  const totalDonated = useMemo(
+    () =>
+      Array.isArray(donations)
+        ? donations.reduce((sum, d) => sum + Number(d.amount || 0), 0)
+        : 0,
+    [donations]
+  );
 
   return (
     <div className="min-h-screen bg-background">
@@ -50,93 +216,101 @@ export default function DonationsPage() {
 
       <main className="md:ml-64 p-4 md:p-8 pt-20 md:pt-8">
         <div className="max-w-7xl mx-auto space-y-6">
-          {/* Header */}
-          <div>
-            <h1 className="text-3xl font-bold text-foreground">Donations</h1>
-            <p className="text-muted-foreground mt-1">
-              Support causes you care about {customerId ? `(ID ${customerId})` : ""}
-            </p>
+
+          {/* HEADER */}
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-3xl font-bold">Donations</h1>
+              <p className="text-muted-foreground">
+                Support causes you care about (ID {customerId})
+              </p>
+            </div>
+
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowPrefModal(true);
+                const mapped = mapPrefNameToId(pref, orgs);
+                if (mapped) setPrefOrgId(mapped);
+              }}
+            >
+              <Settings2 className="w-4 h-4 mr-2" />
+              Edit Preferences
+            </Button>
           </div>
 
-          {/* Stats */}
+          {/* STAT CARDS */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {/* Total Donated */}
             <Card>
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">Total Donated</CardTitle>
-                <Heart className="w-4 h-4 text-primary" />
+              <CardHeader>
+                <CardTitle>Total Donated</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">${totalDonated.toFixed(2)}</div>
-                <p className="text-xs text-muted-foreground mt-1">
-                  {loading ? "Loading…" : `Across ${donations?.length || 0} donations`}
+                <div className="text-2xl font-bold">
+                  ${totalDonated.toFixed(2)}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Across {donations?.length || 0} donations
                 </p>
               </CardContent>
             </Card>
 
+            {/* Latest Donation */}
             <Card>
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">Latest Donation</CardTitle>
-                <TreePine className="w-4 h-4 text-primary" />
+              <CardHeader>
+                <CardTitle>Latest Donation</CardTitle>
               </CardHeader>
               <CardContent>
-                {loading ? (
-                  <div className="text-sm text-muted-foreground">Loading…</div>
-                ) : donations?.length ? (
+                {donations?.length ? (
                   <>
                     <div className="text-2xl font-bold">
                       ${Number(donations[0].amount).toFixed(2)}
                     </div>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      {new Date(donations[0].date || Date.now()).toLocaleDateString()}
+                    <p className="text-xs text-muted-foreground">
+                      {formatDate(donations[0].date)}
                     </p>
                   </>
                 ) : (
-                  <div className="text-sm text-muted-foreground">No donations made.</div>
+                  <p>No donations yet.</p>
                 )}
               </CardContent>
             </Card>
 
+            {/* Give Today */}
             <Card>
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">Give Today</CardTitle>
-                <Wind className="w-4 h-4 text-primary" />
+              <CardHeader>
+                <CardTitle>Give Today</CardTitle>
               </CardHeader>
               <CardContent>
                 <form className="space-y-3" onSubmit={onDonate}>
-                  <div className="grid grid-cols-5 gap-2">
-                    <div className="col-span-3">
-                      <Label className="text-xs">Organization</Label>
-                      <Select value={orgId} onValueChange={setOrgId}>
-                        <SelectTrigger><SelectValue placeholder="Choose charity" /></SelectTrigger>
-                        <SelectContent>
-                          {organizations.map((o) => (
-                            <SelectItem key={o.id} value={String(o.id)}>{o.name}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="col-span-2">
-                      <Label className="text-xs">Amount (SGD)</Label>
-                      <Input
-                        value={amount}
-                        onChange={(e) => setAmount(e.target.value)}
-                        type="number"
-                        step="0.01"
-                        min="0.01"
-                        placeholder="10.00"
-                        required
-                      />
-                    </div>
-                  </div>
-                  <Button type="submit" className="w-full" disabled={adding || !orgId || !amount || !customerId}>
+                  <Label>Organisation</Label>
+                  <Select value={orgId || ""} onValueChange={setOrgId}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Choose organisation" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {orgs.map((o) => (
+                        <SelectItem key={o.OrganisationId} value={String(o.OrganisationId)}>
+                          {o.Name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+
+                  <Label>Amount</Label>
+                  <Input
+                    value={amount}
+                    onChange={(e) => setAmount(e.target.value)}
+                    type="number"
+                    min="1"
+                    required
+                  />
+
+                  <Button type="submit">
                     <Heart className="w-4 h-4 mr-2" />
-                    {adding ? "Processing..." : "Donate Now"}
+                    Donate Now
                   </Button>
-                  {addError && (
-                    <p className="text-xs text-red-600">
-                      Failed to donate: {String(addError.message || addError)}
-                    </p>
-                  )}
                 </form>
               </CardContent>
             </Card>
@@ -145,37 +319,24 @@ export default function DonationsPage() {
           {/* Featured Orgs */}
           <Card>
             <CardHeader>
-              <CardTitle>Featured Organizations</CardTitle>
-              <CardDescription>Choose where your donations make an impact</CardDescription>
+              <CardTitle>Featured Organisations</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {organizations.map((org) => {
-                  const Icon = org.icon;
-                  return (
-                    <div
-                      key={org.id}
-                      className="p-4 rounded-lg border border-border hover:bg-muted/50 transition-colors"
-                    >
-                      <div className="flex items-start gap-4 mb-4">
-                        <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
-                          <Icon className="w-6 h-6 text-primary" />
-                        </div>
-                        <div className="flex-1">
-                          <h3 className="font-semibold text-foreground mb-1">{org.name}</h3>
-                          <span className="inline-block px-2 py-1 rounded-full bg-primary/10 text-primary text-xs font-medium">
-                            {org.category}
-                          </span>
-                        </div>
-                      </div>
-                      <Button className="w-full" onClick={() => { setOrgId(String(org.id)); }}>
+              {orgsError ? (
+                <p className="text-red-500">{orgsError}</p>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {orgs.map((o) => (
+                    <div key={o.OrganisationId} className="p-4 border rounded-lg">
+                      <div className="font-semibold">{o.Name}</div>
+                      <Button className="mt-3 w-full" onClick={() => setOrgId(String(o.OrganisationId))}>
                         <Heart className="w-4 h-4 mr-2" />
-                        Donate to {org.name}
+                        Donate to {o.Name}
                       </Button>
                     </div>
-                  );
-                })}
-              </div>
+                  ))}
+                </div>
+              )}
             </CardContent>
           </Card>
 
@@ -183,52 +344,77 @@ export default function DonationsPage() {
           <Card>
             <CardHeader>
               <CardTitle>Donation History</CardTitle>
-              <CardDescription>Your recent contributions</CardDescription>
             </CardHeader>
             <CardContent>
-              {loading ? (
-                <div className="p-6 text-sm text-muted-foreground">Loading your donations…</div>
-              ) : error ? (
-                <div className="p-6 text-sm text-red-600">
-                  Failed to load donations: {String(error.message || error)}
-                </div>
-              ) : donations?.length ? (
+              {donations?.length ? (
                 <div className="space-y-3">
                   {donations.map((d) => {
-                    const OrgIcon = organizations.find((o) => String(o.id) === String(d.orgId))?.icon || Heart;
+                    const org = orgs.find(
+                      (o) => String(o.OrganisationId) === String(d.orgId)
+                    );
                     return (
-                      <div key={d.id} className="flex items-center justify-between p-4 rounded-lg border border-border">
-                        <div className="flex items-center gap-4">
-                          <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
-                            <OrgIcon className="w-5 h-5 text-primary" />
-                          </div>
-                          <div>
-                            <p className="font-medium text-foreground">
-                              {organizations.find((o) => String(o.id) === String(d.orgId))?.name || "Organization"}
-                            </p>
-                            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                              <span>{d.date ? new Date(d.date).toLocaleDateString() : "-"}</span>
-                              <span>•</span>
-                              <span>Service</span>
-                            </div>
-                          </div>
+                      <div key={d.id} className="p-4 border rounded-lg flex items-center justify-between">
+                        <div>
+                          <p className="font-medium">{org?.Name || "Organisation"}</p>
+                          <p className="text-sm text-muted-foreground">
+                            {formatDate(d.date)}
+                          </p>
                         </div>
-                        <div className="text-right">
-                          <p className="font-semibold text-primary">${Number(d.amount || 0).toFixed(2)}</p>
-                        </div>
+                        <p className="font-semibold text-primary">
+                          ${Number(d.amount).toFixed(2)}
+                        </p>
                       </div>
                     );
                   })}
                 </div>
               ) : (
-                <div className="p-6 text-sm text-muted-foreground border rounded-lg">
-                  No donations made.
-                </div>
+                <p>No donations yet.</p>
               )}
             </CardContent>
           </Card>
         </div>
       </main>
+
+      {/* PREFERENCE MODAL */}
+      {showPrefModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <Card className="w-full max-w-md">
+            <CardHeader>
+              <CardTitle>Edit Donation Preference</CardTitle>
+              <CardDescription>
+                Select your favourite organisation
+              </CardDescription>
+            </CardHeader>
+
+            <CardContent className="space-y-4">
+              <Label>Preferred Organisation</Label>
+
+              <Select value={prefOrgId || ""} onValueChange={setPrefOrgId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Choose organisation" />
+                </SelectTrigger>
+                <SelectContent>
+                  {orgs.map((o) => (
+                    <SelectItem
+                      key={o.OrganisationId}
+                      value={String(o.OrganisationId)}
+                    >
+                      {o.Name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              <div className="flex justify-end gap-3 mt-4">
+                <Button variant="outline" onClick={() => setShowPrefModal(false)}>
+                  Cancel
+                </Button>
+                <Button onClick={onSavePreference}>Save Preference</Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
     </div>
   );
 }

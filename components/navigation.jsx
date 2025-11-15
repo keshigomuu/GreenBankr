@@ -4,22 +4,27 @@ import { useState } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { Button } from "@/components/ui/button"
-import { LayoutDashboard, ArrowLeftRight, Heart, Gift, Leaf, Receipt, Bell, Settings, Menu, X } from "lucide-react"
+import {
+  LayoutDashboard,
+  Heart,
+  Gift,
+  Leaf,
+  Receipt,
+  Menu,
+  X,
+} from "lucide-react" // 👈 removed Bell + Settings; kept Receipt for Accounts
 
 export function Navigation() {
   const pathname = usePathname()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
 
+  // 👇 Removed /transactions, /notifications, /preferences
   const navItems = [
     { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-    { href: "/transactions", label: "Transactions", icon: Receipt },
     { href: "/accounts", label: "Accounts", icon: Receipt },
-    // { href: "/transfer", label: "Transfer", icon: ArrowLeftRight },
     { href: "/donations", label: "Donations", icon: Heart },
     { href: "/rewards", label: "Rewards", icon: Gift },
     { href: "/impact", label: "Carbon Impact", icon: Leaf },
-    { href: "/notifications", label: "Notifications", icon: Bell },
-    { href: "/preferences", label: "Settings", icon: Settings },
   ]
 
   const isActive = (href) => pathname === href
@@ -43,7 +48,10 @@ export function Navigation() {
               const Icon = item.icon
               return (
                 <Link key={item.href} href={item.href}>
-                  <Button variant={isActive(item.href) ? "secondary" : "ghost"} className="w-full justify-start gap-3">
+                  <Button
+                    variant={isActive(item.href) ? "secondary" : "ghost"}
+                    className="w-full justify-start gap-3"
+                  >
                     <Icon className="w-5 h-5" />
                     {item.label}
                   </Button>
@@ -71,7 +79,11 @@ export function Navigation() {
             </div>
             <span className="text-lg font-bold text-foreground">GreenBankr</span>
           </Link>
-          <Button variant="ghost" size="icon" onClick={() => setMobileMenuOpen(!mobileMenuOpen)}>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+          >
             {mobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
           </Button>
         </div>
@@ -82,7 +94,11 @@ export function Navigation() {
               {navItems.map((item) => {
                 const Icon = item.icon
                 return (
-                  <Link key={item.href} href={item.href} onClick={() => setMobileMenuOpen(false)}>
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    onClick={() => setMobileMenuOpen(false)}
+                  >
                     <Button
                       variant={isActive(item.href) ? "secondary" : "ghost"}
                       className="w-full justify-start gap-3"

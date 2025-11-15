@@ -1,3 +1,4 @@
+// app/api/organisations/route.js
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -57,4 +58,5 @@ export async function GET() {
       { status: 500 }
     );
   }
+}
 }
