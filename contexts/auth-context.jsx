@@ -2,7 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect } from "react";
 
-const AuthContext = createContext(null);   // better default than {}
+const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
@@ -14,14 +14,18 @@ export function AuthProvider({ children }) {
       if (savedUser) {
         try {
           const parsed = JSON.parse(savedUser);
-          // Normalize on load in case older records exist
+          // Include depositAccount on reload
           const normalized = {
             customerId: parsed?.customerId ?? parsed?.id ?? null,
             icNumber: parsed?.icNumber ?? "",
             name: parsed?.name ?? "Customer",
             email: parsed?.email ?? "",
             phone: parsed?.phone ?? "",
-            depositAccount: parsed?.depositAccount ?? "",   // ← keep it on reload
+            depositAccount:
+              parsed?.depositAccount ??
+              parsed?.DepositeAcct ??
+              parsed?.raw?.DepositeAcct ??
+              "",
             raw: parsed?.raw ?? parsed?.customerData ?? null,
           };
           setUser(normalized);
@@ -36,14 +40,13 @@ export function AuthProvider({ children }) {
   }, []);
 
   const login = (userData) => {
-    // Accept any shape and normalize to our standard
     const normalized = {
       customerId: userData?.customerId ?? userData?.id ?? null,
       icNumber: userData?.icNumber ?? "",
       name: userData?.name ?? "Customer",
       email: userData?.email ?? "",
       phone: userData?.phone ?? "",
-      depositAccount: userData?.depositAccount ?? "",      // ← from signup / login
+      depositAccount: userData?.depositAccount ?? "",
       raw: userData?.raw ?? userData?.customerData ?? null,
     };
     setUser(normalized);
@@ -66,14 +69,13 @@ export function AuthProvider({ children }) {
 
   const updateUser = (updatedData) => {
     const merged = { ...user, ...updatedData };
-    // Keep normalization guarantees
     const normalized = {
       customerId: merged?.customerId ?? merged?.id ?? null,
       icNumber: merged?.icNumber ?? "",
       name: merged?.name ?? "Customer",
       email: merged?.email ?? "",
       phone: merged?.phone ?? "",
-      depositAccount: merged?.depositAccount ?? "",        // ← keep here too
+      depositAccount: merged?.depositAccount ?? "",
       raw: merged?.raw ?? null,
     };
     setUser(normalized);
@@ -82,9 +84,8 @@ export function AuthProvider({ children }) {
     }
   };
 
-  // Convenience getters
   const getCustomerId = () => user?.customerId ?? null;
-  const getDepositAccount = () => user?.depositAccount ?? "";   // ← NEW FUNCTION
+  const getDepositAccount = () => user?.depositAccount ?? "";
 
   return (
     <AuthContext.Provider
@@ -96,7 +97,7 @@ export function AuthProvider({ children }) {
         updateUser,
         isAuthenticated: !!user?.customerId,
         getCustomerId,
-        getDepositAccount,     // ← EXPOSE IT HERE
+        getDepositAccount,
       }}
     >
       {children}

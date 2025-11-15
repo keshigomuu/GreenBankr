@@ -42,8 +42,12 @@ export default function LoginPage() {
       login({
         customerId: data.user?.customerId,
         icNumber: icNumber.trim().toUpperCase(),
-        name: data.user?.name,
-        email: data.user?.email,
+        name:
+          data.user?.name ||
+          `${data.user?.givenName ?? ""} ${data.user?.familyName ?? ""}`.trim(),
+        email: data.user?.email || "",
+        phone: data.user?.phone || "",
+        depositAccount: data.user?.depositAccount || "",
         raw: data.user,
       });
 
