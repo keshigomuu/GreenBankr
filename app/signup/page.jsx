@@ -11,48 +11,62 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Leaf, Loader2, AlertCircle } from "lucide-react";
+import { useEffect } from "react";
+
 
 export default function SignupPage() {
   const router = useRouter();
   const { login } = useAuth();
 
+  // Organisation select state
+  const [orgs, setOrgs] = useState([]);
+  const [orgsLoading, setOrgsLoading] = useState(false);
+  const [orgsError, setOrgsError] = useState("");
+
   const [form, setForm] = useState({
     // Identity - Required
     icNumber: "",
-    givenName: "",
     familyName: "",
+    givenName: "",
     dateOfBirth: "2014-12-31",
     gender: "",
-    occupation: "",
 
     // Contact - Required
     emailAddress: "",
-    phoneCountryCode: "+65",
-    phoneLocalNumber: "",
-
-    // Address - Optional but recommended
-    streetAddress: "",
-    city: "",
-    state: "",
-    country: "SG",
-    postalCode: "",
+    countryCode: "65",
+    mobileNumber: "",
+    phoneCountryCode: "65",
 
     // Account - Required
     preferredUserId: "",
+    currency: "SGD",
     password: "",
     confirmPassword: "",
-    createDepositAccount: true,
 
-    // Employment - Optional
-    positionTitle: "",
-    yearOfService: 0,
-    employerName: "",
-    workingInSingapore: false,
-    
-    // Financial - Optional
-    annualSalary: 50000,
-    currency: "SGD"
+    // Extra fields for backend
+    tenantId: "600",
+    customerType: "100",
+    annualSalary: 0,
+    Preference: false,
+    DonationOrg: "",
+    // Donation preference UI state
+    wantToDonate: false,
+    selectedOrganization: ""
   });
+
+  useEffect(() => {
+    if (!form.wantToDonate) return;
+    setOrgsLoading(true);
+    setOrgsError("");
+    fetch("/api/organisations")
+      .then(async (res) => {
+        if (!res.ok) throw new Error("Failed to fetch organisations");
+        const data = await res.json();
+        setOrgs(data.organisations || []);
+      })
+      .catch((e) => setOrgsError(e.message || "Failed to load organizations"))
+      .finally(() => setOrgsLoading(false));
+  }, [form.wantToDonate]);
 
   const [agreed, setAgreed] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -71,36 +85,36 @@ export default function SignupPage() {
     setForm(prev => ({ ...prev, [name]: value }));
   };
 
-  const testDirectAPI = async () => {
-    try {
-      console.log("🧪 Testing direct API call...");
-      setDebugInfo("Testing direct API call...");
+  // const testDirectAPI = async () => {
+  //   try {
+  //     console.log("🧪 Testing direct API call...");
+  //     setDebugInfo("Testing direct API call...");
       
-      const testPayload = {
-        icNumber: form.icNumber || "T99999999T",
-        givenName: form.givenName || "TestGiven",
-        familyName: form.familyName || "TestFamily",
-        emailAddress: form.emailAddress || "test@example.com",
-        phoneLocalNumber: form.phoneLocalNumber || "81523286",
-        preferredUserId: form.preferredUserId || "testuser123",
-        password: form.password || "123456789"
-      };
+  //     const testPayload = {
+  //       icNumber: form.icNumber || "T99999999T",
+  //       givenName: form.givenName || "TestGiven",
+  //       familyName: form.familyName || "TestFamily",
+  //       emailAddress: form.emailAddress || "test@example.com",
+  //       phoneLocalNumber: form.mobileNumber || "81523286",
+  //       preferredUserId: form.preferredUserId || "testuser123",
+  //       password: form.password || "123456789"
+  //     };
       
-      const res = await fetch("/api/test/postman-compare", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(testPayload)
-      });
+  //     const res = await fetch("/api/test/postman-compare", {
+  //       method: "POST",
+  //       headers: { "Content-Type": "application/json" },
+  //       body: JSON.stringify(testPayload)
+  //     });
       
-      const result = await res.json();
-      console.log("🧪 Direct API test result:", result);
-      setDebugInfo(JSON.stringify(result, null, 2));
+  //     const result = await res.json();
+  //     console.log("🧪 Direct API test result:", result);
+  //     setDebugInfo(JSON.stringify(result, null, 2));
       
-    } catch (error) {
-      console.error("🧪 Direct API test failed:", error);
-      setDebugInfo(`Direct API test failed: ${error.message}`);
-    }
-  };
+  //   } catch (error) {
+  //     console.error("🧪 Direct API test failed:", error);
+  //     setDebugInfo(`Direct API test failed: ${error.message}`);
+  //   }
+  // };
 
   const submit = async (e) => {
     e.preventDefault();
@@ -129,84 +143,70 @@ export default function SignupPage() {
     }
 
     setLoading(true);
-    
+
     try {
-      console.log("🚀 === SIGNUP FORM SUBMISSION ===");
+      // Helper to derive a stable id from varied API fields
+      const deriveId = (o) => String(
+        o?.id ?? o?.organisationId ?? o?.OrganisationId ?? o?.name ?? o?.organisationName ?? o?.Name ?? ""
+      );
+      const deriveName = (o) => (
+        o?.name ?? o?.organisationName ?? o?.Name ?? "Organisation"
+      );
+
+      // Set donation preference and org
+      let donationPreference = false;
+      let donationOrg = "";
       
+      if (form.wantToDonate && form.selectedOrganization) {
+        donationPreference = true;
+        const selectedOrg = orgs.find(o => deriveId(o) === String(form.selectedOrganization));
+        donationOrg = selectedOrg ? deriveName(selectedOrg) : form.selectedOrganization;
+      }
+
       // Prepare payload for API
       const payload = {
-        // Identity
         icNumber: form.icNumber.trim().toUpperCase(),
-        givenName: form.givenName.trim(),
         familyName: form.familyName.trim(),
+        givenName: form.givenName.trim(),
         dateOfBirth: form.dateOfBirth,
         gender: form.gender,
-        occupation: form.occupation,
-
-        // Contact
         emailAddress: form.emailAddress.trim(),
-        phoneCountryCode: form.phoneCountryCode.trim(),
-        phoneLocalNumber: form.phoneLocalNumber.trim(),
-        countryCode: form.country,
-
-        // Address
-        streetAddress: form.streetAddress.trim(),
-        city: form.city.trim(),
-        state: form.state.trim(),
-        country: form.country.trim(),
-        postalCode: form.postalCode.trim(),
-
-        // Account
-        preferredUserId: form.preferredUserId.trim(),
+        countryCode: form.countryCode,
+        mobileNumber: form.mobileNumber.trim(),
+        phoneCountryCode: form.countryCode,
+        preferredUserld: form.emailAddress.trim(),
+        currency: "SGD",
         password: form.password,
-        createDepositAccount: form.createDepositAccount,
-        currency: form.currency,
-
-        // Employment
-        positionTitle: form.positionTitle.trim(),
-        yearOfService: parseInt(form.yearOfService) || 0,
-        employerName: form.employerName.trim(),
-        workingInSingapore: form.workingInSingapore,
-
-        // Financial
-        annualSalary: parseInt(form.annualSalary) || 50000
+        tenantId: "600",
+        customerType: "100",
+        annualSalary: Number(form.annualSalary) || 0,
+        Preference: donationPreference,
+        DonationOrg: donationOrg
       };
 
-      console.log("📤 Frontend payload:", payload);
-      console.log("📤 Payload keys:", Object.keys(payload));
-
+      console.log(payload);
       const res = await fetch("/api/auth/signup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
 
-      console.log("📡 Response status:", res.status);
-      console.log("📡 Response ok:", res.ok);
-
       let data;
       try {
         const responseText = await res.text();
-        console.log("📥 Raw response text:", responseText);
         data = responseText ? JSON.parse(responseText) : {};
-        console.log("📥 Parsed response:", data);
+        console.log(data);
       } catch (parseError) {
-        console.error("❌ Failed to parse response:", parseError);
         setDebugInfo(`Response parse error: ${parseError.message}`);
         throw new Error("Invalid server response");
       }
 
       if (!res.ok || !data?.success) {
-        console.error("❌ Signup failed:");
-        console.error("  - Status:", res.status);
-        console.error("  - Data:", data);
-        
         setDebugInfo(JSON.stringify({
           status: res.status,
           ok: res.ok,
           data: data
         }, null, 2));
-        
         throw new Error(data?.error || `Signup failed (${res.status})`);
       }
 
@@ -222,13 +222,9 @@ export default function SignupPage() {
         depositAccount: data.user.depositAccount,
         loyaltyPoints: data.user.loyaltyPoints || 0
       };
-
-      console.log("✅ Logging in user:", userData);
       login(userData);
       router.push("/dashboard");
-
     } catch (error) {
-      console.error("❌ Signup error:", error);
       setErr(error.message || "Signup failed. Please try again.");
     } finally {
       setLoading(false);
@@ -259,11 +255,11 @@ export default function SignupPage() {
             )}
 
             {/* Debug Info */}
-            {debugInfo && (
+            {/* {debugInfo && (
               <div className="p-3 bg-gray-100 border rounded-md">
                 <p className="text-xs font-mono whitespace-pre-wrap">{debugInfo}</p>
               </div>
-            )}
+            )} */}
 
 
             {/* Identity Section */}
@@ -302,6 +298,32 @@ export default function SignupPage() {
                   />
                 </div>
                 <div className="space-y-2">
+                  <Label htmlFor="gender">Gender *</Label>
+                  <select
+                    id="gender"
+                    name="gender"
+                    value={form.gender}
+                    onChange={onChange}
+                    required
+                    className="w-full border rounded px-3 py-2 focus:outline-none focus:ring"
+                  >
+                    <option value="">Select gender</option>
+                    <option value="Male">Male</option>
+                    <option value="Female">Female</option>
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="dateOfBirth">Date of Birth *</Label>
+                  <Input 
+                    id="dateOfBirth" 
+                    name="dateOfBirth" 
+                    type="date" 
+                    value={form.dateOfBirth} 
+                    onChange={onChange} 
+                    required 
+                  />
+                </div>
+                <div className="space-y-2">
                   <Label htmlFor="emailAddress">Email Address *</Label>
                   <Input 
                     id="emailAddress" 
@@ -313,23 +335,37 @@ export default function SignupPage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="phoneLocalNumber">Phone Number *</Label>
-                  <Input 
-                    id="phoneLocalNumber" 
-                    name="phoneLocalNumber" 
-                    value={form.phoneLocalNumber} 
-                    onChange={onChange} 
-                    placeholder="81234567"
-                    required 
-                  />
+                  <Label htmlFor="mobileNumber">Mobile Number *</Label>
+                  <div className="flex gap-2">
+                    <Input 
+                      id="countryCode" 
+                      name="countryCode" 
+                      value={form.countryCode} 
+                      onChange={onChange} 
+                      placeholder="65" 
+                      className="w-20"
+                      required 
+                    />
+                    <Input 
+                      id="mobileNumber" 
+                      name="mobileNumber" 
+                      value={form.mobileNumber} 
+                      onChange={onChange} 
+                      placeholder="81234567" 
+                      className="flex-1"
+                      required 
+                    />
+                  </div>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="preferredUserId">Username *</Label>
+                  <Label htmlFor="annualSalary">Annual Salary *</Label>
                   <Input 
-                    id="preferredUserId" 
-                    name="preferredUserId" 
-                    value={form.preferredUserId} 
+                    id="annualSalary" 
+                    name="annualSalary" 
+                    type="number" 
+                    value={form.annualSalary} 
                     onChange={onChange} 
+                    placeholder="15000" 
                     required 
                   />
                 </div>
@@ -355,6 +391,70 @@ export default function SignupPage() {
                     required 
                   />
                 </div>
+              </div>
+            </div>
+
+            {/* Donation Preferences */}
+            <div className="space-y-4">
+              <h3 className="text-lg font-medium">Donation Preferences</h3>
+              <div className="space-y-4">
+                <div className="flex items-start space-x-2">
+                  <Checkbox 
+                    id="wantToDonate" 
+                    checked={form.wantToDonate} 
+                    onCheckedChange={(checked) => {
+                      setForm(prev => ({ 
+                        ...prev, 
+                        wantToDonate: checked,
+                        selectedOrganization: checked ? prev.selectedOrganization : ""
+                      }));
+                    }} 
+                  />
+                  <label htmlFor="wantToDonate" className="text-sm text-muted-foreground">
+                    I want to support environmental causes through donations
+                  </label>
+                </div>
+
+                {form.wantToDonate && (
+                  <div className="space-y-2 ml-6">
+                    <Label htmlFor="selectedOrganization">Choose an organization</Label>
+                    {orgsLoading ? (
+                      <div className="text-xs text-muted-foreground">Loading organizations...</div>
+                    ) : orgsError ? (
+                      <div className="text-xs text-destructive">{orgsError}</div>
+                    ) : (
+                      <Select 
+                        value={form.selectedOrganization} 
+                        onValueChange={(value) => handleSelectChange('selectedOrganization', value)}
+                      >
+                        <SelectTrigger id="selectedOrganization">
+                          <SelectValue placeholder="Select an organization" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {orgs.map((org, idx) => {
+                            const oid = String(
+                              org.id ?? org.organisationId ?? org.OrganisationId ?? org.name ?? org.organisationName ?? org.Name ?? idx + 1
+                            );
+                            const name = org.name ?? org.organisationName ?? org.Name ?? `Organisation ${idx + 1}`;
+                            return (
+                              <SelectItem key={oid} value={oid}>
+                                <div className="flex items-center gap-2">
+                                  {org.logo && (
+                                    <img src={org.logo} alt="logo" className="h-4 w-4 rounded-full" />
+                                  )}
+                                  {name}
+                                </div>
+                              </SelectItem>
+                            );
+                          })}
+                        </SelectContent>
+                      </Select>
+                    )}
+                    <p className="text-xs text-muted-foreground">
+                      You can make donations to your selected organization after account creation
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
 
