@@ -16,8 +16,8 @@ export async function POST(req) {
       { key: "givenName", value: body.givenName },
       { key: "familyName", value: body.familyName },
       { key: "emailAddress", value: body.emailAddress },
-      { key: "phoneLocalNumber", value: body.phoneLocalNumber },
-      { key: "preferredUserId", value: body.preferredUserId },
+      { key: "mobileNumber", value: body.mobileNumber },
+      { key: "preferredUserld", value: body.preferredUserld },
       { key: "password", value: body.password },
     ];
 
@@ -41,43 +41,25 @@ export async function POST(req) {
       givenName: body.givenName?.trim() || "",
       dateOfBirth: body.dateOfBirth || "2014-12-31",
       gender: body.gender?.trim() || "",
-      occupation: body.occupation?.trim() || "",
-
-      // Address
-      streetAddress: body.streetAddress?.trim() || "",
-      city: body.city?.trim() || "",
-      state: body.state?.trim() || "",
-      country: body.country?.trim() || "",
-      postalCode: body.postalCode?.trim() || "",
 
       // Contact
       emailAddress: body.emailAddress?.trim() || "",
-      countryCode: body.countryCode?.trim() || body.country?.trim() || "",
-      mobileNumber: body.phoneLocalNumber?.trim() || body.mobileNumber?.trim() || "",
-      phoneCountryCode: body.phoneCountryCode?.trim() || "+65",
-      phoneAreaCode: body.phoneAreaCode?.trim() || "",
-      phoneLocalNumber: body.phoneLocalNumber?.trim() || body.mobileNumber?.trim() || "",
-
-      // Employment
-      positionTitle: body.positionTitle?.trim() || "",
-      yearOfService: parseInt(body.yearOfService) || 0,
-      employerName: body.employerName?.trim() || "",
-      officeAddress1: body.officeAddress1?.trim() || "",
-      officeAddress2: body.officeAddress2?.trim() || "",
-      officeAddress3: body.officeAddress3?.trim() || "",
-      officeContactNumber: body.officeContactNumber?.trim() || "",
-      officeContactNumberExt: body.officeContactNumberExt?.trim() || "",
-      workingInSingapore: Boolean(body.workingInSingapore),
+      countryCode: body.countryCode?.trim() || "",
+      mobileNumber: body.mobileNumber?.trim() || "",
+      phoneCountryCode: body.phoneCountryCode?.trim() || "65",
 
       // Account
       // NOTE: composite service expects preferredUserld (lowercase L)
-      preferredUserld: body.preferredUserId?.trim() || "",
-      currency: body.currency?.trim() || "",
-      createDepositAccount: Boolean(body.createDepositAccount),
+      preferredUserld: body.preferredUserld?.trim() || "",
+      currency: body.currency?.trim() || "SGD",
       password: body.password || "",
 
       // Financial
-      annualSalary: parseInt(body.annualSalary) || 50000,
+      annualSalary: parseInt(body.annualSalary) || 15000,
+
+      // Donation preferences
+      Preference: Boolean(body.Preference),
+      DonationOrg: body.DonationOrg?.trim() || "",
     };
 
     console.log("[signup] 📤 Calling customer creation API...");
