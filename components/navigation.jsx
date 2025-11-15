@@ -13,6 +13,7 @@ export function Navigation() {
   const navItems = [
     { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
     { href: "/transactions", label: "Transactions", icon: Receipt },
+    { href: "/accounts", label: "Accounts", icon: Receipt },
     // { href: "/transfer", label: "Transfer", icon: ArrowLeftRight },
     { href: "/donations", label: "Donations", icon: Heart },
     { href: "/rewards", label: "Rewards", icon: Gift },

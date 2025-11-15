@@ -2,7 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect } from "react";
 
-const AuthContext = createContext({});
+const AuthContext = createContext(null);   // better default than {}
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
@@ -21,6 +21,7 @@ export function AuthProvider({ children }) {
             name: parsed?.name ?? "Customer",
             email: parsed?.email ?? "",
             phone: parsed?.phone ?? "",
+            depositAccount: parsed?.depositAccount ?? "",   // ← keep it on reload
             raw: parsed?.raw ?? parsed?.customerData ?? null,
           };
           setUser(normalized);
@@ -42,6 +43,7 @@ export function AuthProvider({ children }) {
       name: userData?.name ?? "Customer",
       email: userData?.email ?? "",
       phone: userData?.phone ?? "",
+      depositAccount: userData?.depositAccount ?? "",      // ← from signup / login
       raw: userData?.raw ?? userData?.customerData ?? null,
     };
     setUser(normalized);
@@ -71,6 +73,7 @@ export function AuthProvider({ children }) {
       name: merged?.name ?? "Customer",
       email: merged?.email ?? "",
       phone: merged?.phone ?? "",
+      depositAccount: merged?.depositAccount ?? "",        // ← keep here too
       raw: merged?.raw ?? null,
     };
     setUser(normalized);
@@ -79,8 +82,9 @@ export function AuthProvider({ children }) {
     }
   };
 
-  // Convenience getter so feature pages can do: const id = getCustomerId();
+  // Convenience getters
   const getCustomerId = () => user?.customerId ?? null;
+  const getDepositAccount = () => user?.depositAccount ?? "";   // ← NEW FUNCTION
 
   return (
     <AuthContext.Provider
@@ -92,6 +96,7 @@ export function AuthProvider({ children }) {
         updateUser,
         isAuthenticated: !!user?.customerId,
         getCustomerId,
+        getDepositAccount,     // ← EXPOSE IT HERE
       }}
     >
       {children}
