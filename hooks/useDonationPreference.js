@@ -1,5 +1,3 @@
-// === FINAL FIXED VERSION (useDonationPreference.js) ===
-
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
@@ -25,7 +23,7 @@ export function useDonationPreference(customerId) {
         data = null;
       }
 
-      // outsystems returns:
+      // OutSystems returns:
       // { Id, Customer_ID, Preference, Organization }
       if (data && typeof data === "object") {
         setPref(data);
@@ -49,14 +47,12 @@ export function useDonationPreference(customerId) {
 
 export async function savePreference({
   customerId,
-  preference,
+  preference = "Yes",
   organization,
   hasExisting,
 }) {
   if (!customerId) throw new Error("Missing customerId");
-
-  const orgValue = String(organization || preference || "");
-  if (!orgValue) throw new Error("Missing organisation");
+  if (!organization) throw new Error("Missing organisation name");
 
   const endpoint = hasExisting
     ? "/api/preferences/update"
@@ -64,14 +60,17 @@ export async function savePreference({
 
   const method = hasExisting ? "PUT" : "POST";
 
+  // 🚨 Important: send EXACTLY what OutSystems expects
+  const payload = {
+    customerId,
+    preference,   // e.g. "Yes"
+    organization, // e.g. "Myriad USA"
+  };
+
   const res = await fetch(endpoint, {
     method,
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      customerId,
-      preference: orgValue,
-      organization: orgValue,
-    }),
+    body: JSON.stringify(payload),
   });
 
   let data;

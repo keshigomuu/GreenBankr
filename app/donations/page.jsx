@@ -98,6 +98,15 @@ export default function DonationsPage() {
     return "";
   }
 
+  // Helper: stable date formatting (no locale-based mismatch)
+  function formatDate(value) {
+    if (!value) return "";
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return "";
+    // Use ISO date (YYYY-MM-DD) so SSR and client match
+    return d.toISOString().split("T")[0];
+  }
+
   // ============================================================
   // LOAD ORGANISATIONS
   // ============================================================
@@ -169,21 +178,28 @@ export default function DonationsPage() {
   const onSavePreference = async () => {
     if (!customerId || !prefOrgId) return;
 
+    // Find the selected organisation's NAME by id
+    const selectedOrg = orgs.find(
+      (o) => String(o.OrganisationId) === String(prefOrgId)
+    );
+    const orgName = selectedOrg?.Name || "";
+
     await savePreference({
       customerId,
-      preference: prefOrgId,
-      organization: prefOrgId,
+      preference: "Yes",
+      organization: orgName,
       hasExisting: !!pref,
     });
 
-    // ⭐ Hold selection immediately (UI won't flicker!)
+    // Optimistically update dropdown and modal selection
     setOrgId(prefOrgId);
     setPrefOrgId(prefOrgId);
 
     setShowPrefModal(false);
 
-    // ⭐ Refresh OutSystems preference in background
-    refreshPref();
+    // We do NOT immediately refresh preference from backend here
+    // to avoid flickering back to any stale value. On the next
+    // page load, the saved preference will be applied via GET.
   };
 
   const totalDonated = useMemo(
@@ -252,7 +268,7 @@ export default function DonationsPage() {
                       ${Number(donations[0].amount).toFixed(2)}
                     </div>
                     <p className="text-xs text-muted-foreground">
-                      {new Date(donations[0].date).toLocaleDateString()}
+                      {formatDate(donations[0].date)}
                     </p>
                   </>
                 ) : (
@@ -341,7 +357,7 @@ export default function DonationsPage() {
                         <div>
                           <p className="font-medium">{org?.Name || "Organisation"}</p>
                           <p className="text-sm text-muted-foreground">
-                            {new Date(d.date).toLocaleDateString()}
+                            {formatDate(d.date)}
                           </p>
                         </div>
                         <p className="font-semibold text-primary">
