@@ -19,82 +19,82 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Heart, TreePine, Droplet, Wind, Users } from "lucide-react";
-import { useAuth } from "@/contexts/auth-context";
-import { useDonationsByCustomer, useAddDonation } from "@/hooks/useDonations";
+import { Heart, Settings2 } from "lucide-react";
 
-const ICONS = [Droplet, TreePine, Wind, Users];
+import { useAuth } from "@/contexts/auth-context";
+import {
+  useDonationsByCustomer,
+  useAddDonation,
+} from "@/hooks/useDonations";
+
+import {
+  useDonationPreference,
+  savePreference,
+} from "@/hooks/useDonationPreference";
 
 export default function DonationsPage() {
   const { getCustomerId } = useAuth();
-  const customerId = getCustomerId(); // e.g. "0000002754"
+  const customerId = getCustomerId();
 
-  // ===== Donations (existing behaviour) =====
-  const { donations, loading, error, refresh } =
-    useDonationsByCustomer(customerId);
-  const { add, loading: adding, error: addError } = useAddDonation();
+  // Organisations
+  const [orgs, setOrgs] = useState([]);
+  const [orgsError, setOrgsError] = useState("");
 
-  const totalDonated = useMemo(
-    () =>
-      Array.isArray(donations)
-        ? donations.reduce((s, d) => s + Number(d.amount || 0), 0)
-        : 0,
-    [donations]
-  );
+  // Donation hooks
+  const {
+    donations,
+    loading: loadingDonations,
+    error: donationError,
+    refresh: refreshDonations,
+  } = useDonationsByCustomer(customerId);
 
-  // ===== Organisations (from GetAllOrganisations via /api/organisations) =====
-  const [organisations, setOrganisations] = useState([]);
-  const [orgLoading, setOrgLoading] = useState(true);
-  const [orgError, setOrgError] = useState(null);
+  const { add: addDonation, loading: addingDonation } = useAddDonation();
 
+  // Donation form
+  const [orgId, setOrgId] = useState("");
+  const [amount, setAmount] = useState("");
+
+  // Preference modal
+  const [showPrefModal, setShowPrefModal] = useState(false);
+
+  const {
+    pref,
+    loading: loadingPref,
+    refresh: refreshPref,
+  } = useDonationPreference(customerId);
+
+  // Load organisations
   useEffect(() => {
-    async function loadOrgs() {
+    const loadOrgs = async () => {
       try {
-        setOrgLoading(true);
-        setOrgError(null);
-
         const res = await fetch("/api/organisations");
-        const data = await res.json().catch(() => ({}));
+        const data = await res.json();
 
-        if (!res.ok) {
-          throw new Error(data?.error || `HTTP ${res.status}`);
-        }
+        if (!res.ok) throw new Error(data.error || "Failed to load organisations");
 
-        setOrganisations(
-          Array.isArray(data.organisations) ? data.organisations : []
-        );
-      } catch (e) {
-        console.error("[donations] failed to load organisations:", e);
-        setOrgError(e);
-        setOrganisations([]);
-      } finally {
-        setOrgLoading(false);
+        setOrgs(data.organisations || []);
+      } catch (err) {
+        setOrgsError(err.message);
       }
-    }
+    };
 
     loadOrgs();
   }, []);
 
-  // Decorate orgs for UI (icons, dummy category)
-  const decoratedOrgs = useMemo(
+  const totalDonated = useMemo(
     () =>
-      organisations.map((org, idx) => ({
-        ...org,
-        uiIcon: ICONS[idx % ICONS.length],
-        uiCategory: "Environment",
-      })),
-    [organisations]
+      Array.isArray(donations)
+        ? donations.reduce((sum, d) => sum + Number(d.amount || 0), 0)
+        : 0,
+    [donations]
   );
 
-  // ===== Donate form =====
-  const [orgId, setOrgId] = useState("");
-  const [amount, setAmount] = useState("");
-
+  // Submit donation
   const onDonate = async (e) => {
     e.preventDefault();
     if (!customerId || !orgId || !amount) return;
 
-    await add({
+    await addDonation({
       customerId,
       orgId: parseInt(orgId, 10),
       amount: Number(amount),
@@ -102,13 +102,23 @@ export default function DonationsPage() {
 
     setAmount("");
     setOrgId("");
-    refresh();
+    refreshDonations();
   };
 
-  const findOrgByDonation = (d) =>
-    decoratedOrgs.find(
-      (o) => String(o.OrganisationId) === String(d.orgId)
-    );
+  // Save preference (ADD or UPDATE handled in savePreference)
+  const onSavePreference = async () => {
+    if (!customerId || !orgId) return;
+
+    await savePreference({
+      customerId,
+      preference: orgId,       // choosing organisation as preference
+      organization: orgId,
+      hasExisting: !!pref,
+    });
+
+    refreshPref();
+    setShowPrefModal(false);
+  };
 
   return (
     <div className="min-h-screen bg-background">
@@ -116,266 +126,217 @@ export default function DonationsPage() {
 
       <main className="md:ml-64 p-4 md:p-8 pt-20 md:pt-8">
         <div className="max-w-7xl mx-auto space-y-6">
-          {/* Header */}
-          <div>
-            <h1 className="text-3xl font-bold text-foreground">Donations</h1>
-            <p className="text-muted-foreground mt-1">
-              Support causes you care about{" "}
-              {customerId ? `(ID ${customerId})` : ""}
-            </p>
+
+          {/* HEADER */}
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-3xl font-bold">Donations</h1>
+              <p className="text-muted-foreground">
+                Support causes you care about (ID {customerId})
+              </p>
+            </div>
+
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowPrefModal(true);
+                setOrgId(pref?.Organization?.toString() || "");
+              }}
+            >
+              <Settings2 className="w-4 h-4 mr-2" />
+              Edit Preferences
+            </Button>
           </div>
 
-          {/* Stats */}
+          {/* STATS */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <Card>
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">
-                  Total Donated
-                </CardTitle>
-                <Heart className="w-4 h-4 text-primary" />
+              <CardHeader>
+                <CardTitle>Total Donated</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">
-                  ${totalDonated.toFixed(2)}
-                </div>
-                <p className="text-xs text-muted-foreground mt-1">
-                  {loading
-                    ? "Loading…"
-                    : `Across ${donations?.length || 0} donations`}
+                <div className="text-2xl font-bold">${totalDonated.toFixed(2)}</div>
+                <p className="text-xs text-muted-foreground">
+                  Across {donations?.length || 0} donations
                 </p>
               </CardContent>
             </Card>
 
             <Card>
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">
-                  Latest Donation
-                </CardTitle>
-                <TreePine className="w-4 h-4 text-primary" />
+              <CardHeader>
+                <CardTitle>Latest Donation</CardTitle>
               </CardHeader>
               <CardContent>
-                {loading ? (
-                  <div className="text-sm text-muted-foreground">
-                    Loading…
-                  </div>
-                ) : donations?.length ? (
+                {donations?.length ? (
                   <>
                     <div className="text-2xl font-bold">
                       ${Number(donations[0].amount).toFixed(2)}
                     </div>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      {new Date(
-                        donations[0].date || Date.now()
-                      ).toLocaleDateString()}
+                    <p className="text-xs text-muted-foreground">
+                      {new Date(donations[0].date).toLocaleDateString()}
                     </p>
                   </>
                 ) : (
-                  <div className="text-sm text-muted-foreground">
-                    No donations made.
-                  </div>
+                  <p>No donations yet.</p>
                 )}
               </CardContent>
             </Card>
 
+            {/* Donate */}
             <Card>
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">
-                  Give Today
-                </CardTitle>
-                <Wind className="w-4 h-4 text-primary" />
+              <CardHeader>
+                <CardTitle>Give Today</CardTitle>
               </CardHeader>
               <CardContent>
                 <form className="space-y-3" onSubmit={onDonate}>
-                  <div className="grid grid-cols-5 gap-2">
-                    <div className="col-span-3">
-                      <Label className="text-xs">Organization</Label>
-                      <Select
-                        value={orgId}
-                        onValueChange={setOrgId}
-                        disabled={orgLoading || !!orgError}
-                      >
-                        <SelectTrigger>
-                          <SelectValue
-                            placeholder={
-                              orgLoading
-                                ? "Loading charities…"
-                                : "Choose charity"
-                            }
-                          />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {decoratedOrgs.map((o) => (
-                            <SelectItem
-                              key={o.OrganisationId}
-                              value={String(o.OrganisationId)}
-                            >
-                              {o.Name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      {orgError && (
-                        <p className="text-xs text-red-600 mt-1">
-                          Failed to load organisations.
-                        </p>
-                      )}
-                    </div>
-                    <div className="col-span-2">
-                      <Label className="text-xs">Amount (SGD)</Label>
-                      <Input
-                        value={amount}
-                        onChange={(e) => setAmount(e.target.value)}
-                        type="number"
-                        step="0.01"
-                        min="0.01"
-                        placeholder="10.00"
-                        required
-                      />
-                    </div>
-                  </div>
-                  <Button
-                    type="submit"
-                    className="w-full"
-                    disabled={
-                      adding ||
-                      !orgId ||
-                      !amount ||
-                      !customerId ||
-                      orgLoading ||
-                      !!orgError
-                    }
-                  >
+                  <Label>Organisation</Label>
+                  <Select value={orgId} onValueChange={setOrgId}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Choose organisation" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {orgs.map((o) => (
+                        <SelectItem
+                          key={o.OrganisationId}
+                          value={String(o.OrganisationId)}
+                        >
+                          {o.Name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+
+                  <Label>Amount</Label>
+                  <Input
+                    value={amount}
+                    onChange={(e) => setAmount(e.target.value)}
+                    type="number"
+                    min="1"
+                    required
+                  />
+
+                  <Button type="submit" disabled={addingDonation}>
                     <Heart className="w-4 h-4 mr-2" />
-                    {adding ? "Processing..." : "Donate Now"}
+                    Donate Now
                   </Button>
-                  {addError && (
-                    <p className="text-xs text-red-600">
-                      Failed to donate: {String(addError.message || addError)}
-                    </p>
-                  )}
                 </form>
               </CardContent>
             </Card>
           </div>
 
-          {/* Featured Orgs */}
+          {/* FEATURED ORGS */}
           <Card>
             <CardHeader>
-              <CardTitle>Featured Organizations</CardTitle>
-              <CardDescription>
-                Choose where your donations make an impact
-              </CardDescription>
+              <CardTitle>Featured Organisations</CardTitle>
             </CardHeader>
             <CardContent>
-              {orgLoading ? (
-                <p className="text-sm text-muted-foreground">
-                  Loading organisations…
-                </p>
-              ) : orgError ? (
-                <p className="text-sm text-red-600">
-                  Failed to load organisations.
-                </p>
+              {orgsError ? (
+                <p className="text-red-500">{orgsError}</p>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {decoratedOrgs.map((org, idx) => {
-                    const Icon = org.uiIcon || ICONS[idx % ICONS.length];
-                    return (
-                      <div
-                        key={org.OrganisationId}
-                        className="p-4 rounded-lg border border-border hover:bg-muted/50 transition-colors"
+                  {orgs.map((o) => (
+                    <div
+                      key={o.OrganisationId}
+                      className="p-4 border rounded-lg hover:bg-muted transition"
+                    >
+                      <div className="font-semibold">{o.Name}</div>
+                      <Button
+                        className="mt-3 w-full"
+                        onClick={() => setOrgId(String(o.OrganisationId))}
                       >
-                        <div className="flex items-start gap-4 mb-4">
-                          <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
-                            <Icon className="w-6 h-6 text-primary" />
-                          </div>
-                          <div className="flex-1">
-                            <h3 className="font-semibold text-foreground mb-1">
-                              {org.Name}
-                            </h3>
-                            <span className="inline-block px-2 py-1 rounded-full bg-primary/10 text-primary text-xs font-medium">
-                              {org.uiCategory}
-                            </span>
-                          </div>
-                        </div>
-                        <Button
-                          className="w-full"
-                          onClick={() =>
-                            setOrgId(String(org.OrganisationId))
-                          }
-                        >
-                          <Heart className="w-4 h-4 mr-2" />
-                          Donate to {org.Name}
-                        </Button>
-                      </div>
-                    );
-                  })}
+                        <Heart className="w-4 h-4 mr-2" />
+                        Donate to {o.Name}
+                      </Button>
+                    </div>
+                  ))}
                 </div>
               )}
             </CardContent>
           </Card>
 
-          {/* Donation History */}
+          {/* DONATION HISTORY */}
           <Card>
             <CardHeader>
               <CardTitle>Donation History</CardTitle>
-              <CardDescription>Your recent contributions</CardDescription>
             </CardHeader>
             <CardContent>
-              {loading ? (
-                <div className="p-6 text-sm text-muted-foreground">
-                  Loading your donations…
-                </div>
-              ) : error ? (
-                <div className="p-6 text-sm text-red-600">
-                  Failed to load donations: {String(error.message || error)}
-                </div>
-              ) : donations?.length ? (
+              {donations?.length ? (
                 <div className="space-y-3">
                   {donations.map((d) => {
-                    const org = findOrgByDonation(d);
-                    const OrgIcon = org?.uiIcon || Heart;
+                    const org = orgs.find(
+                      (o) => String(o.OrganisationId) === String(d.orgId)
+                    );
+
                     return (
                       <div
                         key={d.id}
-                        className="flex items-center justify-between p-4 rounded-lg border border-border"
+                        className="p-4 border rounded-lg flex items-center justify-between"
                       >
-                        <div className="flex items-center gap-4">
-                          <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
-                            <OrgIcon className="w-5 h-5 text-primary" />
-                          </div>
-                          <div>
-                            <p className="font-medium text-foreground">
-                              {org?.Name || "Organization"}
-                            </p>
-                            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                              <span>
-                                {d.date
-                                  ? new Date(d.date).toLocaleDateString()
-                                  : "-"}
-                              </span>
-                              <span>•</span>
-                              <span>Service</span>
-                            </div>
-                          </div>
-                        </div>
-                        <div className="text-right">
-                          <p className="font-semibold text-primary">
-                            ${Number(d.amount || 0).toFixed(2)}
+                        <div>
+                          <p className="font-medium">{org?.Name || "Organisation"}</p>
+                          <p className="text-sm text-muted-foreground">
+                            {new Date(d.date).toLocaleDateString()}
                           </p>
                         </div>
+                        <p className="font-semibold text-primary">
+                          ${Number(d.amount).toFixed(2)}
+                        </p>
                       </div>
                     );
                   })}
                 </div>
               ) : (
-                <div className="p-6 text-sm text-muted-foreground border rounded-lg">
-                  No donations made.
-                </div>
+                <p>No donations yet.</p>
               )}
             </CardContent>
           </Card>
         </div>
       </main>
+
+      {/* EDIT PREF MODAL */}
+      {showPrefModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <Card className="w-full max-w-md">
+            <CardHeader>
+              <CardTitle>Edit Donation Preference</CardTitle>
+              <CardDescription>Select your favourite organisation</CardDescription>
+            </CardHeader>
+
+            <CardContent className="space-y-4">
+              <Label>Preferred Organisation</Label>
+              <Select
+                value={orgId}
+                onValueChange={setOrgId}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Choose organisation" />
+                </SelectTrigger>
+                <SelectContent>
+                  {orgs.map((o) => (
+                    <SelectItem
+                      key={o.OrganisationId}
+                      value={String(o.OrganisationId)}
+                    >
+                      {o.Name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              <div className="flex justify-end gap-3 mt-4">
+                <Button variant="outline" onClick={() => setShowPrefModal(false)}>
+                  Cancel
+                </Button>
+
+                <Button onClick={onSavePreference}>
+                  Save Preference
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
     </div>
   );
 }
