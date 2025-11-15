@@ -1,41 +1,93 @@
+// === FINAL FIXED VERSION (useDonationPreference.js) ===
+
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 export function useDonationPreference(customerId) {
   const [pref, setPref] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
 
-  async function refresh() {
+  const fetchPref = useCallback(async () => {
     if (!customerId) return;
-    setLoading(true);
-    const r = await fetch(
-      `/api/donations/preferences?customerId=${customerId}`
-    );
-    const j = await r.json();
-    setPref(j.preference || null);
-    setLoading(false);
-  }
 
-  useEffect(() => {
-    refresh();
+    setLoading(true);
+
+    try {
+      const res = await fetch(`/api/preferences?customerId=${customerId}`, {
+        cache: "no-store",
+      });
+
+      let data = null;
+      try {
+        data = await res.json();
+      } catch {
+        data = null;
+      }
+
+      // outsystems returns:
+      // { Id, Customer_ID, Preference, Organization }
+      if (data && typeof data === "object") {
+        setPref(data);
+      } else {
+        setPref(null);
+      }
+    } catch (err) {
+      console.warn("Preference fetch error ignored:", err);
+      setPref(null);
+    } finally {
+      setLoading(false);
+    }
   }, [customerId]);
 
-  return { pref, refresh, loading };
+  useEffect(() => {
+    fetchPref();
+  }, [fetchPref]);
+
+  return { pref, loading, refresh: fetchPref };
 }
 
-export async function savePreference({ customerId, preference, organization, hasExisting }) {
-  const url = hasExisting
-    ? "/api/donations/preferences/update"
-    : "/api/donations/preferences/add";
+export async function savePreference({
+  customerId,
+  preference,
+  organization,
+  hasExisting,
+}) {
+  if (!customerId) throw new Error("Missing customerId");
 
-  const res = await fetch(url, {
-    method: hasExisting ? "PUT" : "POST",
+  const orgValue = String(organization || preference || "");
+  if (!orgValue) throw new Error("Missing organisation");
+
+  const endpoint = hasExisting
+    ? "/api/preferences/update"
+    : "/api/preferences/add";
+
+  const method = hasExisting ? "PUT" : "POST";
+
+  const res = await fetch(endpoint, {
+    method,
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ customerId, preference, organization }),
+    body: JSON.stringify({
+      customerId,
+      preference: orgValue,
+      organization: orgValue,
+    }),
   });
 
-  const j = await res.json();
-  if (!j.success) throw new Error(j.error);
-  return j;
+  let data;
+  try {
+    data = await res.json();
+  } catch {
+    data = null;
+  }
+
+  if (!res.ok || (data && data.Success === false)) {
+    const msg =
+      data?.ErrorMessage ||
+      data?.error ||
+      `Failed to ${hasExisting ? "update" : "add"} preference`;
+    throw new Error(msg);
+  }
+
+  return data;
 }
