@@ -198,18 +198,17 @@ export default function AccountsPage() {
     );
   };
 
-  const formatDateTime = (iso) => {
-    if (!iso) return "—";
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return iso;
-    return d.toLocaleString("en-SG", {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-    });
+  function formatDate(value) {
+    if (!value) return "";
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return "";
+    // Use ISO date (YYYY-MM-DD) so SSR and client match
+    return d.toISOString().split("T")[0];
+  }
+
+  // Update the formatDateTime function to use formatDate
+  const formatDateTime = (dateValue) => {
+    return formatDate(dateValue);
   };
 
   // Payment mode: Digital for deposit/withdraw, else whatever tBank returns / Cash
