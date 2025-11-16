@@ -18,7 +18,6 @@ export default function AccountsPage() {
 
   const [customerId, setCustomerId] = useState(null);
   const [accountId, setAccountId] = useState("");
-  const [makeDonation, setMakeDonation] = useState(false);
 
   const [balance, setBalance] = useState(null);
   const [loadingBalance, setLoadingBalance] = useState(true);
@@ -256,21 +255,18 @@ const sorted = [...onlyOutgoing].sort((a, b) => {
         receivingAcctId,
         amount: amtNum,
         category,
-        makeDonation, // 👈 donation flag passed through
       });
 
-      // Save category mapping by transactionId
-      if (txn?.transactionId && txn?.MerchantCategory) {
-        const nextMap = {
-          ...categoryMap,
-          [txn.transactionId]: txn.MerchantCategory,
-        };
+      // Support both camelCase and PascalCase transaction id from API
+      const txId = txn?.transactionId || txn?.TransactionId;
+
+      // Save category mapping locally (server no longer returns MerchantCategory on txn)
+      if (txId && category) {
+        const nextMap = { ...categoryMap, [txId]: category };
         persistCategoryMap(nextMap);
       }
 
-      setFormSuccess(
-        `Transaction successful (ID: ${txn?.transactionId || "unknown"})`
-      );
+      setFormSuccess(`Transaction successful (ID: ${txId || "unknown"})`);
       setAmount("");
       setReloadToken((t) => t + 1); // reload history & balance
     } catch (err) {
@@ -573,23 +569,6 @@ const sorted = [...onlyOutgoing].sort((a, b) => {
                         <option value="Bills">Bills</option>
                         <option value="Others">Others</option>
                       </select>
-                    </div>
-
-                    {/* Donate toggle (minimal UI addition) */}
-                    <div className="flex items-center gap-2 mt-2">
-                      <input
-                        id="donateToggle"
-                        type="checkbox"
-                        checked={makeDonation}
-                        onChange={(e) => setMakeDonation(e.target.checked)}
-                        className="w-4 h-4"
-                      />
-                      <label
-                        htmlFor="donateToggle"
-                        className="text-sm text-muted-foreground"
-                      >
-                        Donate this transaction
-                      </label>
                     </div>
                   </div>
 
