@@ -1,3 +1,5 @@
+// hooks/useDonations.js
+
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
@@ -16,7 +18,11 @@ export function useDonationsByCustomer(customerId) {
     setLoading(true);
     setError(null);
 
-    fetch(`/api/donations/by-customer?customerId=${encodeURIComponent(customerId)}`)
+    fetch(
+      `/api/donations/by-customer?customerId=${encodeURIComponent(
+        customerId
+      )}`
+    )
       .then(async (r) => {
         const body = await r.json().catch(() => ({}));
         if (!r.ok) {
@@ -40,11 +46,17 @@ export function useDonationsByCustomer(customerId) {
       .finally(() => setLoading(false));
   }, [customerId]);
 
-  useEffect(() => { refresh(); }, [refresh]);
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
 
   return { donations, loading, error, refresh };
 }
 
+/**
+ * Add a donation via our Next.js API route.
+ * This keeps secrets (env + API key) on the server only.
+ */
 export function useAddDonation() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -58,9 +70,10 @@ export function useAddDonation() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ customerId, amount, orgId }),
       });
+
       const j = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`);
-      return j; // { donationId }
+      return j; // e.g. { success: true, donationId, ... }
     } catch (e) {
       setError(e);
       throw e;
@@ -72,6 +85,9 @@ export function useAddDonation() {
   return { add, loading, error };
 }
 
+/**
+ * Load organisations once.
+ */
 export function useOrganisations() {
   const [orgs, setOrgs] = useState([]);
   const [loading, setLoading] = useState(true);
