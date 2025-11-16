@@ -355,7 +355,7 @@ export default function DonationsPage() {
                     return (
                       <div key={d.id} className="p-4 border rounded-lg flex items-center justify-between">
                         <div>
-                          <p className="font-medium">{org?.Name || "Organisation"}</p>
+                          <p className="font-medium">{org?.Name || "Sustainability Fund"}</p>
                           <p className="text-sm text-muted-foreground">
                             {formatDate(d.date)}
                           </p>
