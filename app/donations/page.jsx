@@ -212,12 +212,32 @@ export default function DonationsPage() {
     setShowPrefModal(false);
   };
 
+  // ============================================================
+  // AGGREGATIONS (TOTAL + LATEST)  ✅ NEW LOGIC HERE
+  // ============================================================
+  const sortedDonations = useMemo(() => {
+    if (!Array.isArray(donations)) return [];
+    return [...donations].sort((a, b) => {
+      const da = new Date(a.date || a.Date || 0).getTime();
+      const db = new Date(b.date || b.Date || 0).getTime();
+      if (Number.isNaN(da) && Number.isNaN(db)) return 0;
+      if (Number.isNaN(da)) return 1;
+      if (Number.isNaN(db)) return -1;
+      return db - da; // newest first
+    });
+  }, [donations]);
+
+  const latestDonation = sortedDonations.length ? sortedDonations[0] : null;
+
   const totalDonated = useMemo(
     () =>
-      Array.isArray(donations)
-        ? donations.reduce((sum, d) => sum + Number(d.amount || 0), 0)
+      Array.isArray(sortedDonations)
+        ? sortedDonations.reduce(
+            (sum, d) => sum + Number(d.amount || 0),
+            0
+          )
         : 0,
-    [donations]
+    [sortedDonations]
   );
 
   return (
@@ -260,24 +280,24 @@ export default function DonationsPage() {
                   ${totalDonated.toFixed(2)}
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Across {donations?.length || 0} donations
+                  Across {sortedDonations.length} donations
                 </p>
               </CardContent>
             </Card>
 
-            {/* Latest Donation */}
+            {/* Latest Donation – now really the latest */}
             <Card>
               <CardHeader>
                 <CardTitle>Latest Donation</CardTitle>
               </CardHeader>
               <CardContent>
-                {donations?.length ? (
+                {latestDonation ? (
                   <>
                     <div className="text-2xl font-bold">
-                      ${Number(donations[0].amount).toFixed(2)}
+                      ${Number(latestDonation.amount || 0).toFixed(2)}
                     </div>
                     <p className="text-xs text-muted-foreground">
-                      {formatDate(donations[0].date)}
+                      {formatDate(latestDonation.date || latestDonation.Date)}
                     </p>
                   </>
                 ) : (
@@ -356,12 +376,10 @@ export default function DonationsPage() {
                     Visit Website
                   </a>
 
-                  {/* 🔽 BUTTON NOW MATCHES "DONATE NOW" DESIGN */}
                   <Button
                     type="button"
                     className="w-full mt-4"
                     onClick={() => {
-                      // Optional: auto-select this org in the "Give Today" dropdown
                       const match = orgs.find(
                         (o) => normalise(o.Name) === normalise(org.name)
                       );
@@ -376,15 +394,15 @@ export default function DonationsPage() {
             ))}
           </div>
 
-          {/* Donation History */}
+          {/* Donation History – now sorted newest → oldest */}
           <Card>
             <CardHeader>
               <CardTitle>Donation History</CardTitle>
             </CardHeader>
             <CardContent>
-              {donations?.length ? (
+              {sortedDonations.length ? (
                 <div className="space-y-3">
-                  {donations.map((d) => {
+                  {sortedDonations.map((d) => {
                     const org = orgs.find(
                       (o) => String(o.OrganisationId) === String(d.orgId)
                     );
@@ -398,11 +416,11 @@ export default function DonationsPage() {
                             {org?.Name || "Sustainability Fund"}
                           </p>
                           <p className="text-sm text-muted-foreground">
-                            {formatDate(d.date)}
+                            {formatDate(d.date || d.Date)}
                           </p>
                         </div>
                         <p className="font-semibold text-primary">
-                          ${Number(d.amount).toFixed(2)}
+                          ${Number(d.amount || 0).toFixed(2)}
                         </p>
                       </div>
                     );
