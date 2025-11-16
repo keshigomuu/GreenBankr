@@ -18,6 +18,7 @@ export default function AccountsPage() {
 
   const [customerId, setCustomerId] = useState(null);
   const [accountId, setAccountId] = useState("");
+  const [makeDonation, setMakeDonation] = useState(false);
 
   const [balance, setBalance] = useState(null);
   const [loadingBalance, setLoadingBalance] = useState(true);
@@ -252,6 +253,7 @@ export default function AccountsPage() {
         receivingAcctId,
         amount: amtNum,
         category,
+        makeDonation, // 👈 donation flag passed through
       });
 
       // Save category mapping by transactionId
@@ -568,6 +570,23 @@ export default function AccountsPage() {
                         <option value="Bills">Bills</option>
                         <option value="Others">Others</option>
                       </select>
+                    </div>
+
+                    {/* Donate toggle (minimal UI addition) */}
+                    <div className="flex items-center gap-2 mt-2">
+                      <input
+                        id="donateToggle"
+                        type="checkbox"
+                        checked={makeDonation}
+                        onChange={(e) => setMakeDonation(e.target.checked)}
+                        className="w-4 h-4"
+                      />
+                      <label
+                        htmlFor="donateToggle"
+                        className="text-sm text-muted-foreground"
+                      >
+                        Donate this transaction
+                      </label>
                     </div>
                   </div>
 
