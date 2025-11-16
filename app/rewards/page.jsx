@@ -56,7 +56,7 @@ const {
     [claims]
   );
 
-  const currentPoints = Math.max((donatedPoints ?? 0) - totalSpent, 0);
+  const currentPoints = donatedPoints ?? 0;
   const lifetimePoints = donatedPoints ?? 0;
 
   const { name: tierName, currentMin, nextMin } = computeTier(lifetimePoints);

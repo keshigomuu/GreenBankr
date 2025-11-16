@@ -111,7 +111,7 @@ const {
     ? claims.reduce((s, c) => s + Number(c.pointsCost || 0), 0)
     : 0;
 
-  const loyaltyPoints = Math.max((donatedPoints ?? 0) - totalSpent, 0);
+  const loyaltyPoints = donatedPoints ?? 0;
 
   // Load saved category map from localStorage (same key as Accounts page)
   useEffect(() => {
