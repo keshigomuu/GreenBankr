@@ -693,7 +693,7 @@ export default function AccountsPage() {
                           {renderAmount(tx)}
                           <span>{tx.currency || "SGD"}</span>
                           <span>{renderPaymentMode(tx)}</span>
-                          <span>{tx.MerchantCategory || "—"}</span>
+                          <span>{tx.MerchantCategory || "Donation"}</span>
                         </div>
                       ))}
                     </div>
