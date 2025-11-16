@@ -87,6 +87,17 @@ export default function LoginPage() {
 
             {err && <p className="text-sm text-destructive">{err}</p>}
           </CardContent>
+          <CardContent>
+            <div className="space-y-2">
+              <Label htmlFor="password">Password</Label>
+              <Input
+                id="password"
+                type="password"
+                placeholder="Enter your password"
+              />
+            </div>
+          </CardContent>
+
 
           <CardFooter className="flex flex-col gap-4">
             <Button type="submit" className="w-full" disabled={loading}>

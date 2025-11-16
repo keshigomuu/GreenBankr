@@ -21,7 +21,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Heart, Settings2 } from "lucide-react";
+import { Heart, Settings2, Loader2, CheckCircle2 } from "lucide-react";
 import { useAuth } from "../../contexts/auth-context";
 
 import { useDonationsByCustomer, useAddDonation } from "@/hooks/useDonations";
@@ -40,9 +40,13 @@ export default function DonationsPage() {
 
   const [showPrefModal, setShowPrefModal] = useState(false);
   const [prefOrgId, setPrefOrgId] = useState("");
+  const [autoDonate, setAutoDonate] = useState(true);
 
   const [orgs, setOrgs] = useState([]);
   const [orgsError, setOrgsError] = useState("");
+  
+  const [donating, setDonating] = useState(false);
+  const [donationSuccess, setDonationSuccess] = useState(false);
 
   const { donations, refresh: refreshDonations } =
     useDonationsByCustomer(customerId);
@@ -167,6 +171,9 @@ export default function DonationsPage() {
         "⚠️ Preference mapping failed — keeping existing dropdown selection."
       );
     }
+    
+    // Set auto-donate preference ("Yes" means auto-donate enabled)
+    setAutoDonate(pref.Preference === "Yes");
   }, [pref, orgs]);
 
   // ============================================================
@@ -176,40 +183,66 @@ export default function DonationsPage() {
     e.preventDefault();
     if (!customerId || !orgId || !amount) return;
 
-    await addDonation({
-      customerId,
-      orgId: parseInt(orgId, 10),
-      amount: Number(amount),
-    });
+    setDonating(true);
+    setDonationSuccess(false);
 
-    setAmount("");
-    refreshDonations();
+    try {
+      await addDonation({
+        customerId,
+        orgId: parseInt(orgId, 10),
+        amount: Number(amount),
+      });
+
+      setAmount("");
+      setDonationSuccess(true);
+      await refreshDonations();
+      
+      // Hide success message after 3 seconds
+      setTimeout(() => setDonationSuccess(false), 3000);
+    } catch (error) {
+      console.error("Donation failed:", error);
+    } finally {
+      setDonating(false);
+    }
   };
 
   // ============================================================
   // SAVE PREFERENCE
   // ============================================================
   const onSavePreference = async () => {
-    if (!customerId || !prefOrgId) return;
+    if (!customerId) return;
+    
+    // If auto-donate is disabled, organization is not required
+    if (autoDonate && !prefOrgId) return;
 
-    // Find the selected organisation's NAME by id
-    const selectedOrg = orgs.find(
-      (o) => String(o.OrganisationId) === String(prefOrgId)
-    );
-    const orgName = selectedOrg?.Name || "";
+    // Find the selected organisation's NAME by id (only if auto-donate is enabled)
+    const orgName = autoDonate 
+      ? (orgs.find((o) => String(o.OrganisationId) === String(prefOrgId))?.Name || "")
+      : "";
 
-    await savePreference({
+    const payload = {
       customerId,
-      preference: "Yes",
-      organization: orgName,
+      preference: autoDonate ? "Yes" : "No",
       hasExisting: !!pref,
-    });
+    };
+
+    // Only include organization field if auto-donate is enabled
+    if (autoDonate) {
+      payload.organization = orgName;
+    }
+
+    await savePreference(payload);
 
     // Optimistically update dropdown and modal selection
-    setOrgId(prefOrgId);
-    setPrefOrgId(prefOrgId);
+    if (autoDonate) {
+      setOrgId(prefOrgId);
+      setPrefOrgId(prefOrgId);
+    }
 
     setShowPrefModal(false);
+    
+    // Reload the page to reflect updated preference
+    window.location.reload();
   };
 
   // ============================================================
@@ -261,6 +294,7 @@ export default function DonationsPage() {
                 setShowPrefModal(true);
                 const mapped = mapPrefNameToId(pref, orgs);
                 if (mapped) setPrefOrgId(mapped);
+                setAutoDonate(pref?.Preference === "Yes");
               }}
             >
               <Settings2 className="w-4 h-4 mr-2" />
@@ -335,18 +369,73 @@ export default function DonationsPage() {
                     value={amount}
                     onChange={(e) => setAmount(e.target.value)}
                     type="number"
-                    min="1"
+                    min="0.01"
+                    step="0.01"
                     required
                   />
 
-                  <Button type="submit">
-                    <Heart className="w-4 h-4 mr-2" />
-                    Donate Now
+                  {donationSuccess && (
+                    <div className="flex items-center gap-2 p-2 bg-green-50 border border-green-200 rounded-md text-green-700 text-sm">
+                      <CheckCircle2 className="w-4 h-4" />
+                      Donation successful!
+                    </div>
+                  )}
+
+                  <Button type="submit" disabled={donating}>
+                    {donating ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        Processing...
+                      </>
+                    ) : (
+                      <>
+                        <Heart className="w-4 h-4 mr-2" />
+                        Donate Now
+                      </>
+                    )}
                   </Button>
                 </form>
               </CardContent>
             </Card>
           </div>
+
+          {/* Donation History – now sorted newest → oldest */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Donation History</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {sortedDonations.length ? (
+                <div className="max-h-[300px] overflow-y-auto space-y-3 pr-2">
+                  {sortedDonations.map((d) => {
+                    const org = orgs.find(
+                      (o) => String(o.OrganisationId) === String(d.orgId)
+                    );
+                    return (
+                      <div
+                        key={d.id}
+                        className="p-4 border rounded-lg flex items-center justify-between"
+                      >
+                        <div>
+                          <p className="font-medium">
+                            {org?.Name || "Sustainability Fund"}
+                          </p>
+                          <p className="text-sm text-muted-foreground">
+                            {formatDate(d.date || d.Date)}
+                          </p>
+                        </div>
+                        <p className="font-semibold text-primary">
+                          ${Number(d.amount || 0).toFixed(2)}
+                        </p>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p>No donations yet.</p>
+              )}
+            </CardContent>
+          </Card>
 
           {/* Featured Orgs */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -394,43 +483,7 @@ export default function DonationsPage() {
             ))}
           </div>
 
-          {/* Donation History – now sorted newest → oldest */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Donation History</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {sortedDonations.length ? (
-                <div className="space-y-3">
-                  {sortedDonations.map((d) => {
-                    const org = orgs.find(
-                      (o) => String(o.OrganisationId) === String(d.orgId)
-                    );
-                    return (
-                      <div
-                        key={d.id}
-                        className="p-4 border rounded-lg flex items-center justify-between"
-                      >
-                        <div>
-                          <p className="font-medium">
-                            {org?.Name || "Sustainability Fund"}
-                          </p>
-                          <p className="text-sm text-muted-foreground">
-                            {formatDate(d.date || d.Date)}
-                          </p>
-                        </div>
-                        <p className="font-semibold text-primary">
-                          ${Number(d.amount || 0).toFixed(2)}
-                        </p>
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <p>No donations yet.</p>
-              )}
-            </CardContent>
-          </Card>
+          
         </div>
       </main>
 
@@ -446,9 +499,9 @@ export default function DonationsPage() {
             </CardHeader>
 
             <CardContent className="space-y-4">
-              <Label>Preferred Organisation</Label>
-
-              <Select value={prefOrgId || ""} onValueChange={setPrefOrgId}>
+              <div className="space-y-2">
+                <Label>Preferred Organisation</Label>
+                <Select value={prefOrgId || ""} onValueChange={setPrefOrgId}>
                 <SelectTrigger>
                   <SelectValue placeholder="Choose organisation" />
                 </SelectTrigger>
@@ -463,6 +516,20 @@ export default function DonationsPage() {
                   ))}
                 </SelectContent>
               </Select>
+              </div>
+
+              <div className="flex items-center space-x-2 pt-2">
+                <input
+                  type="checkbox"
+                  id="autoDonate"
+                  checked={autoDonate}
+                  onChange={(e) => setAutoDonate(e.target.checked)}
+                  className="w-4 h-4 rounded border-gray-300"
+                />
+                <label htmlFor="autoDonate" className="text-sm text-muted-foreground">
+                  Automatically donate with every transaction
+                </label>
+              </div>
 
               <div className="flex justify-end gap-3 mt-4">
                 <Button
