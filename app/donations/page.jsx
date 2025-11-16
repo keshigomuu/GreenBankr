@@ -21,7 +21,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Heart, Settings2 } from "lucide-react";
+import { Heart, Settings2, Loader2, CheckCircle2 } from "lucide-react";
 import { useAuth } from "../../contexts/auth-context";
 
 import { useDonationsByCustomer, useAddDonation } from "@/hooks/useDonations";
@@ -43,6 +43,9 @@ export default function DonationsPage() {
 
   const [orgs, setOrgs] = useState([]);
   const [orgsError, setOrgsError] = useState("");
+  
+  const [donating, setDonating] = useState(false);
+  const [donationSuccess, setDonationSuccess] = useState(false);
 
   const { donations, refresh: refreshDonations } =
     useDonationsByCustomer(customerId);
@@ -176,14 +179,27 @@ export default function DonationsPage() {
     e.preventDefault();
     if (!customerId || !orgId || !amount) return;
 
-    await addDonation({
-      customerId,
-      orgId: parseInt(orgId, 10),
-      amount: Number(amount),
-    });
+    setDonating(true);
+    setDonationSuccess(false);
 
-    setAmount("");
-    refreshDonations();
+    try {
+      await addDonation({
+        customerId,
+        orgId: parseInt(orgId, 10),
+        amount: Number(amount),
+      });
+
+      setAmount("");
+      setDonationSuccess(true);
+      await refreshDonations();
+      
+      // Hide success message after 3 seconds
+      setTimeout(() => setDonationSuccess(false), 3000);
+    } catch (error) {
+      console.error("Donation failed:", error);
+    } finally {
+      setDonating(false);
+    }
   };
 
   // ============================================================
@@ -340,14 +356,68 @@ export default function DonationsPage() {
                     required
                   />
 
-                  <Button type="submit">
-                    <Heart className="w-4 h-4 mr-2" />
-                    Donate Now
+                  {donationSuccess && (
+                    <div className="flex items-center gap-2 p-2 bg-green-50 border border-green-200 rounded-md text-green-700 text-sm">
+                      <CheckCircle2 className="w-4 h-4" />
+                      Donation successful!
+                    </div>
+                  )}
+
+                  <Button type="submit" disabled={donating}>
+                    {donating ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        Processing...
+                      </>
+                    ) : (
+                      <>
+                        <Heart className="w-4 h-4 mr-2" />
+                        Donate Now
+                      </>
+                    )}
                   </Button>
                 </form>
               </CardContent>
             </Card>
           </div>
+
+          {/* Donation History – now sorted newest → oldest */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Donation History</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {sortedDonations.length ? (
+                <div className="max-h-[300px] overflow-y-auto space-y-3 pr-2">
+                  {sortedDonations.map((d) => {
+                    const org = orgs.find(
+                      (o) => String(o.OrganisationId) === String(d.orgId)
+                    );
+                    return (
+                      <div
+                        key={d.id}
+                        className="p-4 border rounded-lg flex items-center justify-between"
+                      >
+                        <div>
+                          <p className="font-medium">
+                            {org?.Name || "Sustainability Fund"}
+                          </p>
+                          <p className="text-sm text-muted-foreground">
+                            {formatDate(d.date || d.Date)}
+                          </p>
+                        </div>
+                        <p className="font-semibold text-primary">
+                          ${Number(d.amount || 0).toFixed(2)}
+                        </p>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p>No donations yet.</p>
+              )}
+            </CardContent>
+          </Card>
 
           {/* Featured Orgs */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -395,43 +465,7 @@ export default function DonationsPage() {
             ))}
           </div>
 
-          {/* Donation History – now sorted newest → oldest */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Donation History</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {sortedDonations.length ? (
-                <div className="space-y-3">
-                  {sortedDonations.map((d) => {
-                    const org = orgs.find(
-                      (o) => String(o.OrganisationId) === String(d.orgId)
-                    );
-                    return (
-                      <div
-                        key={d.id}
-                        className="p-4 border rounded-lg flex items-center justify-between"
-                      >
-                        <div>
-                          <p className="font-medium">
-                            {org?.Name || "Sustainability Fund"}
-                          </p>
-                          <p className="text-sm text-muted-foreground">
-                            {formatDate(d.date || d.Date)}
-                          </p>
-                        </div>
-                        <p className="font-semibold text-primary">
-                          ${Number(d.amount || 0).toFixed(2)}
-                        </p>
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <p>No donations yet.</p>
-              )}
-            </CardContent>
-          </Card>
+          
         </div>
       </main>
 
