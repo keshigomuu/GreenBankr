@@ -18,6 +18,7 @@ export default function AccountsPage() {
 
   const [customerId, setCustomerId] = useState(null);
   const [accountId, setAccountId] = useState("");
+  const [makeDonation, setMakeDonation] = useState(false);
 
   const [balance, setBalance] = useState(null);
   const [loadingBalance, setLoadingBalance] = useState(true);
@@ -134,11 +135,15 @@ export default function AccountsPage() {
         const txs = await getTransactionHistory(accountId, startDate, endDate);
 
         // Sort newest → oldest
-        const sorted = [...txs].sort((a, b) => {
-          const da = new Date(a.transactionDate || 0).getTime();
-          const db = new Date(b.transactionDate || 0).getTime();
-          return db - da;
-        });
+        const onlyOutgoing = txs.filter((tx) => {
+  const from = tx.accountFrom || tx.Cust_Acct_Id || tx.FromAccount;
+  return String(from) === String(accountId);
+});
+const sorted = [...onlyOutgoing].sort((a, b) => {
+  const da = new Date(a.transactionDate || 0).getTime();
+  const db = new Date(b.transactionDate || 0).getTime();
+  return db - da;
+});
 
         // Ask our backend for known categories (if implemented)
         const ids = sorted
@@ -197,18 +202,17 @@ export default function AccountsPage() {
     );
   };
 
-  const formatDateTime = (iso) => {
-    if (!iso) return "—";
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return iso;
-    return d.toLocaleString("en-SG", {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-    });
+  function formatDate(value) {
+    if (!value) return "";
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return "";
+    // Use ISO date (YYYY-MM-DD) so SSR and client match
+    return d.toISOString().split("T")[0];
+  }
+
+  // Update the formatDateTime function to use formatDate
+  const formatDateTime = (dateValue) => {
+    return formatDate(dateValue);
   };
 
   // Payment mode: Digital for deposit/withdraw, else whatever tBank returns / Cash
@@ -252,6 +256,7 @@ export default function AccountsPage() {
         receivingAcctId,
         amount: amtNum,
         category,
+        makeDonation, // 👈 donation flag passed through
       });
 
       // Save category mapping by transactionId
@@ -569,6 +574,23 @@ export default function AccountsPage() {
                         <option value="Others">Others</option>
                       </select>
                     </div>
+
+                    {/* Donate toggle (minimal UI addition) */}
+                    <div className="flex items-center gap-2 mt-2">
+                      <input
+                        id="donateToggle"
+                        type="checkbox"
+                        checked={makeDonation}
+                        onChange={(e) => setMakeDonation(e.target.checked)}
+                        className="w-4 h-4"
+                      />
+                      <label
+                        htmlFor="donateToggle"
+                        className="text-sm text-muted-foreground"
+                      >
+                        Donate this transaction
+                      </label>
+                    </div>
                   </div>
 
                   {formError && (
@@ -674,7 +696,7 @@ export default function AccountsPage() {
                           {renderAmount(tx)}
                           <span>{tx.currency || "SGD"}</span>
                           <span>{renderPaymentMode(tx)}</span>
-                          <span>{tx.MerchantCategory || "—"}</span>
+                          <span>{tx.MerchantCategory || "Donation"}</span>
                         </div>
                       ))}
                     </div>

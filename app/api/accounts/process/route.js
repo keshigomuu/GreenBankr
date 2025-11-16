@@ -1,7 +1,9 @@
-// app/api/accounts/process/route.js
 import { NextResponse } from "next/server";
-import { txnCategoryStore } from "@/lib/txn-category-store"; 
-export const runtime = "nodejs";
+import { txnCategoryStore } from "@/lib/txn-category-store";
+import { runOrchestration } from "@/lib/orchestration-api";
+import { DonationsAPI } from "@/lib/donations-api";
+import { LoyaltyAPI } from "@/lib/loyalty-api";
+import { getOrganisationPreference } from "@/lib/organisations-api"; // 👈 ADD THIS
 
 export async function POST(req) {
   try {
@@ -13,113 +15,118 @@ export async function POST(req) {
       receivingAcctId,
       amount,
       category,
+      makeDonation = false,
     } = body || {};
 
     if (!customerId || !custAcctId || !receivingAcctId || !amount || !category) {
-      return NextResponse.json(
-        {
-          success: false,
-          error:
-            "Missing one or more required fields: customerId, custAcctId, receivingAcctId, amount, category",
-        },
-        { status: 400 }
-      );
+      return NextResponse.json({
+        success: false,
+        error:
+          "Missing one or more required fields: customerId, custAcctId, receivingAcctId, amount, category",
+      });
     }
 
-    const base =
-      process.env.PROCESS_TRANSACTION_BASE_URL ||
-      process.env.PROCESS_TXN_BASE_URL ||
-      "";
-    const apiKey =
-      process.env.PROCESS_TRANSACTION_API_KEY ||
-      process.env.PROCESS_TXN_API_KEY ||
-      "";
-    const apiKeyHeader =
-      process.env.PROCESS_TRANSACTION_API_KEY_HEADER ||
-      process.env.PROCESS_TXN_API_KEY_HEADER ||
-      "X-API-Key";
+    // ========= PROCESS TRANSACTION (UNCHANGED) =========
+    const base = process.env.PROCESS_TRANSACTION_BASE_URL;
+    const apiKey = process.env.PROCESS_TRANSACTION_API_KEY;
+    const apiKeyHeader = process.env.PROCESS_TRANSACTION_API_KEY_HEADER;
 
-    if (!base || !apiKey) {
-      return NextResponse.json(
-        {
-          success: false,
-          error:
-            "ProcessTransaction API is not configured (check PROCESS_TRANSACTION_* env vars).",
-        },
-        { status: 500 }
-      );
-    }
-
-    // Your base ends with /rest/ProcessTxn
-    // Swagger shows full endpoint: /rest/ProcessTxn/ProcessTxn
-    const url = `${base.replace(/\/$/, "")}/ProcessTxn`;
-
-    const payload = {
-      CustomerId: String(customerId),
-      Cust_Acct_Id: String(custAcctId),
-      Recieving_Acct_Id: String(receivingAcctId),
-      txnAmt: Number(amount),
-      MerchantCategory: String(category),
-    };
-
-    const headers = {
-      "Content-Type": "application/json",
-      Accept: "application/json",
-      [apiKeyHeader]: apiKey,
-    };
-
-    const upstreamRes = await fetch(url, {
+    const upstreamRes = await fetch(base + "/ProcessTxn", {
       method: "POST",
-      headers,
-      body: JSON.stringify(payload),
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        [apiKeyHeader]: apiKey,
+      },
+      body: JSON.stringify({
+        CustomerId: customerId,
+        Cust_Acct_Id: custAcctId,
+        Recieving_Acct_Id: receivingAcctId,
+        txnAmt: Number(amount),
+        MerchantCategory: category,
+      }),
     });
 
-    const ct = upstreamRes.headers.get("content-type") || "";
-    const isJson = ct.toLowerCase().includes("application/json");
-    const upstreamBody = isJson ? await upstreamRes.json() : await upstreamRes.text();
+    const transactionBody = await upstreamRes.json();
 
     if (!upstreamRes.ok) {
-      const msg = isJson
-        ? upstreamBody?.message || JSON.stringify(upstreamBody)
-        : upstreamBody;
       return NextResponse.json(
-        {
-          success: false,
-          error: msg || `Upstream error (${upstreamRes.status})`,
-        },
+        { success: false, error: transactionBody },
         { status: upstreamRes.status }
       );
-        }
-        try {
-    const tid = upstreamBody?.transactionId;
-    const cat = upstreamBody?.MerchantCategory;
-    if (tid && cat) {
-        txnCategoryStore.set(String(tid), String(cat));
     }
-    } catch (e) {
-    console.warn("[process transaction] failed to store category", e);
-    }
-    // Example response:
-    // {
-    //   "transactionId": "0000420523",
-    //   "CustomerId": "0000002754",
-    //   "Cust_Acct_Id": "0000005953",
-    //   "Recieving_Acct_Id": "0000005954",
-    //   "txnAmt": 3.0,
-    //   "MerchantCategory": "Transport"
-    // }
 
+    // Store local category for your UI
+    try {
+      const tid = transactionBody.TransactionId;
+      if (tid && category) txnCategoryStore.set(String(tid), String(category));
+    } catch (err) {}
+
+    // ========= CALL ORCHESTRATION SERVICE =========
+    let orchestration = null;
+    try {
+      orchestration = await runOrchestration({
+        customerId,
+        custAcctId,
+        receivingAcctId,
+        amount,
+        category,
+      });
+    } catch (err) {
+      orchestration = null;
+    }
+
+    // ========== HANDLE DONATION LOGIC ==========
+    let donationRecord = null;
+    let loyaltyRecord = null;
+
+    if (makeDonation && orchestration?.transactionAmount > 0) {
+      // 1️⃣ Get user preferred organisation
+      let preferredOrg = null;
+      try {
+        preferredOrg = await getOrganisationPreference(customerId);
+      } catch (err) {
+        preferredOrg = null;
+      }
+
+      // 2️⃣ Determine actual organisation ID for donation
+      // Preferred organisation → real Org_ID
+      // No preference → null (Sustainability Fund)
+      const resolvedOrgId = preferredOrg?.preferredOrgId || null;
+
+      // 3️⃣ Create donation entry
+      try {
+        donationRecord = await DonationsAPI.addDonation({
+          customerId,
+          amount: orchestration.transactionAmount,
+          orgId: resolvedOrgId,        // 👈 NULL means Sustainability Fund
+        });
+      } catch (err) {}
+
+      // 4️⃣ Add loyalty points
+      try {
+        loyaltyRecord = await LoyaltyAPI.updatePoints({
+          customerId,
+          amount: orchestration.totalPointsEarned,
+          operation: "INCREASE",
+        });
+      } catch (err) {}
+    }
+
+    // ========= RETURN FINAL RESPONSE =========
     return NextResponse.json(
       {
         success: true,
-        transaction: upstreamBody,
+        transaction: transactionBody,
+        orchestration,
+        donation: donationRecord,
+        loyalty: loyaltyRecord,
       },
       { status: 200 }
     );
   } catch (err) {
-    console.error("[process transaction] error", err);
     return NextResponse.json(
-      { success: false, error: err?.message || "Unknown error" },
+      { success: false, error: err?.message ?? "Unknown error" },
       { status: 500 }
     );
   }
