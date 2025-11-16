@@ -40,7 +40,8 @@ import {
   getTransactionCategories,
 } from "@/lib/account-api";
 import { getCarbonImpact } from "@/lib/impact-api";
-import { useLoyaltyPoints } from "@/hooks/useLoyalty";
+import { useLoyaltyBalance } from "@/hooks/useLoyaltyBalance";
+
 import { useMyClaims } from "@/hooks/useRewards";
 import { formatSGT } from "@/lib/formatSGT";
 
@@ -97,11 +98,12 @@ export default function DashboardPage() {
 
   const [loading, setLoading] = useState(true);
 
-  const {
-    points: donatedPoints,
-    loading: pointsLoading,
-    error: pointsError,
-  } = useLoyaltyPoints(customerId);
+const {
+  balance: donatedPoints,
+  loading: pointsLoading,
+  error: pointsError,
+} = useLoyaltyBalance(customerId);
+
 
   const { claims } = useMyClaims(customerId);
 

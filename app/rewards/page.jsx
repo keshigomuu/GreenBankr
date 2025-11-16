@@ -16,7 +16,8 @@ import { Star, Zap } from "lucide-react";
 import RewardCard from "@/components/rewards/RewardCard";
 import ClaimsTable from "@/components/rewards/ClaimsTable";
 import { useRewardsCatalog, useMyClaims } from "@/hooks/useRewards";
-import { useLoyaltyPoints } from "@/hooks/useLoyalty";
+import { useLoyaltyBalance } from "@/hooks/useLoyaltyBalance";
+
 
 /* Tier logic unchanged */
 function computeTier(lifetime) {
@@ -39,12 +40,13 @@ export default function RewardsPage() {
     refresh: refreshClaims,
   } = useMyClaims(customerId);
 
-  const {
-    points: donatedPoints,
-    loading: pointsLoading,
-    error: pointsError,
-    refresh: refreshPoints,
-  } = useLoyaltyPoints(customerId);
+const {
+  balance: donatedPoints,
+  loading: pointsLoading,
+  error: pointsError,
+  refresh: refreshPoints,
+} = useLoyaltyBalance(customerId);
+
 
   const totalSpent = useMemo(
     () =>
