@@ -1,23 +1,23 @@
-"use client"
+"use client";
 
-import { useEffect, useState } from "react"
-import { Navigation } from "@/components/navigation"
+import { useEffect, useState } from "react";
+import { Navigation } from "@/components/navigation";
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
-import { Progress } from "@/components/ui/progress"
+} from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Progress } from "@/components/ui/progress";
 import {
   ArrowUpRight,
   ArrowDownRight,
   Leaf,
   DollarSign,
   Gift,
-} from "lucide-react"
+} from "lucide-react";
 import {
   Line,
   LineChart,
@@ -27,88 +27,92 @@ import {
   YAxis,
   CartesianGrid,
   ResponsiveContainer,
-} from "recharts"
+} from "recharts";
 import {
   ChartContainer,
   ChartTooltip,
   ChartTooltipContent,
-} from "@/components/ui/chart"
-import { useAuth } from "@/contexts/auth-context"
+} from "@/components/ui/chart";
+import { useAuth } from "@/contexts/auth-context";
 import {
   getDepositBalance,
   getTransactionHistory,
   getTransactionCategories,
-} from "@/lib/account-api"
-import { getCarbonImpact } from "@/lib/impact-api"
-import { useLoyaltyPoints } from "@/hooks/useLoyalty"
-import { useMyClaims } from "@/hooks/useRewards"
+} from "@/lib/account-api";
+import { getCarbonImpact } from "@/lib/impact-api";
+import { useLoyaltyPoints } from "@/hooks/useLoyalty";
+import { useMyClaims } from "@/hooks/useRewards";
 
 /**
  * Helper to find a key in an object whose name matches any of the
  * provided regex patterns (case-insensitive).
  */
 function findKey(obj, regexes) {
-  const keys = Object.keys(obj || {})
+  const keys = Object.keys(obj || {});
   for (const re of regexes) {
-    const regex = new RegExp(re, "i")
-    const match = keys.find((k) => regex.test(k))
-    if (match) return match
+    const regex = new RegExp(re, "i");
+    const match = keys.find((k) => regex.test(k));
+    if (match) return match;
   }
-  return null
+  return null;
 }
 
 /**
  * Helper to safely parse a numeric amount (strip $ and commas).
  */
 function parseAmount(value) {
-  if (value === null || value === undefined) return 0
-  const str = String(value)
-  const cleaned = str.replace(/[^0-9.\-]/g, "")
-  const num = Number(cleaned)
-  return isNaN(num) ? 0 : num
+  if (value === null || value === undefined) return 0;
+  const str = String(value);
+  const cleaned = str.replace(/[^0-9.\-]/g, "");
+  const num = Number(cleaned);
+  return isNaN(num) ? 0 : num;
 }
 
 export default function DashboardPage() {
-  const { user, getCustomerId, getDepositAccount } = useAuth()
+  const { user, getCustomerId, getDepositAccount } = useAuth();
 
   const customerId =
     (typeof getCustomerId === "function" && getCustomerId()) ||
     user?.customerId ||
     user?.customerID ||
-    null
+    null;
 
-  const accountId = user?.depositAccount || user?.accountId || 
-    getDepositAccount?.() || user?.raw?.DepositeAcct || null
+  const accountId =
+    user?.depositAccount ||
+    user?.accountId ||
+    getDepositAccount?.() ||
+    user?.raw?.DepositeAcct ||
+    null;
 
-  const [balance, setBalance] = useState(null)
-  const [balanceChangePct, setBalanceChangePct] = useState(0)
+  const [balance, setBalance] = useState(null);
+  const [balanceChangePct, setBalanceChangePct] = useState(0);
 
-  const [carbonThisMonth, setCarbonThisMonth] = useState(0)
-  const [carbonChangePct, setCarbonChangePct] = useState(0)
-  const [carbonTrend, setCarbonTrend] = useState([])
+  const [carbonThisMonth, setCarbonThisMonth] = useState(0);
+  const [carbonChangePct, setCarbonChangePct] = useState(0);
+  const [carbonTrend, setCarbonTrend] = useState([]);
 
-  const [spendingByCategory, setSpendingByCategory] = useState([])
-  const [error, setError] = useState(null)
-  const [recentTransactions, setRecentTransactions] = useState([])
-  const [categoryMap, setCategoryMap] = useState({})
+  const [spendingByCategory, setSpendingByCategory] = useState([]);
+  const [error, setError] = useState(null);
+  const [recentTransactions, setRecentTransactions] = useState([]);
+  const [categoryMap, setCategoryMap] = useState({});
 
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(true);
 
   // Use the same loyalty data source as rewards page
   const {
     points: donatedPoints, // lifetime donated points
     loading: pointsLoading,
     error: pointsError,
-  } = useLoyaltyPoints(customerId)
+  } = useLoyaltyPoints(customerId);
 
-  const { claims } = useMyClaims(customerId)
+  const { claims } = useMyClaims(customerId);
 
   // Calculate current points the same way as rewards page
-  const totalSpent = Array.isArray(claims) 
-    ? claims.reduce((s, c) => s + Number(c.pointsCost || 0), 0) 
-    : 0
+  const totalSpent = Array.isArray(claims)
+    ? claims.reduce((s, c) => s + Number(c.pointsCost || 0), 0)
+    : 0;
 
-  const loyaltyPoints = Math.max((donatedPoints ?? 0) - totalSpent, 0)
+  const loyaltyPoints = Math.max((donatedPoints ?? 0) - totalSpent, 0);
 
   // Load saved category map from localStorage
   useEffect(() => {
@@ -125,44 +129,54 @@ export default function DashboardPage() {
 
   useEffect(() => {
     if (!customerId || !accountId) {
-      setLoading(false)
-      setError("Please log in to view your dashboard.")
-      return
+      setLoading(false);
+      setError("Please log in to view your dashboard.");
+      return;
     }
 
     const loadData = async () => {
       try {
-        setLoading(true)
-        setError(null)
+        setLoading(true);
+        setError(null);
 
         // Last ~3 months of transactions
-        const end = new Date()
-        const start = new Date()
-        start.setMonth(start.getMonth() - 3)
+        const end = new Date();
+        const start = new Date();
+        start.setMonth(start.getMonth() - 3);
 
-        const startDate = start.toISOString().slice(0, 10)
-        const endDate = end.toISOString().slice(0, 10)
+        const startDate = start.toISOString().slice(0, 10);
+        const endDate = end.toISOString().slice(0, 10);
 
         const [bal, txns, impact] = await Promise.all([
           getDepositBalance(customerId, accountId),
           getTransactionHistory(accountId, startDate, endDate),
           getCarbonImpact(customerId),
-        ])
+        ]);
 
         // ===== Account balance =====
-        setBalance(Number(bal) || 0)
+        setBalance(Number(bal) || 0);
         // Placeholder % change (until you have historical balances)
-        setBalanceChangePct(12.5)
+        setBalanceChangePct(12.5);
 
         // ===== Process transactions with categories =====
         // Sort newest → oldest (fix the date field access)
         const sortedTx = [...txns].sort((a, b) => {
-          const dateKeyA = findKey(a, ["transactionDate", "TranDate", "Date", "Time"])
-          const dateKeyB = findKey(b, ["transactionDate", "TranDate", "Date", "Time"])
-          const da = dateKeyA ? new Date(a[dateKeyA]).getTime() : 0
-          const db = dateKeyB ? new Date(b[dateKeyB]).getTime() : 0
-          return db - da
-        })
+          const dateKeyA = findKey(a, [
+            "transactionDate",
+            "TranDate",
+            "Date",
+            "Time",
+          ]);
+          const dateKeyB = findKey(b, [
+            "transactionDate",
+            "TranDate",
+            "Date",
+            "Time",
+          ]);
+          const da = dateKeyA ? new Date(a[dateKeyA]).getTime() : 0;
+          const db = dateKeyB ? new Date(b[dateKeyB]).getTime() : 0;
+          return db - da;
+        });
 
         // Get categories for transactions (same as accounts page)
         const ids = sortedTx
@@ -191,120 +205,159 @@ export default function DashboardPage() {
         });
 
         // Recent 6 transactions for dashboard
-        setRecentTransactions(enhancedTx.slice(0, 6))
+        setRecentTransactions(enhancedTx.slice(0, 6));
 
         // ===== Carbon impact (this month + trend) =====
-        const rawImpact = impact.raw || {}
+        const rawImpact = impact.raw || {};
         const impactTxns =
-          impact.transactions || rawImpact.Transactions || []
+          impact.transactions || rawImpact.Transactions || [];
 
-        const now = new Date()
-        const thisMonthIndex = now.getMonth()
-        const thisYear = now.getFullYear()
-        const prevMonthDate = new Date(thisYear, thisMonthIndex - 1, 1)
-        const prevMonthIndex = prevMonthDate.getMonth()
-        const prevMonthYear = prevMonthDate.getFullYear()
+        const now = new Date();
+        const thisMonthIndex = now.getMonth();
+        const thisYear = now.getFullYear();
+        const prevMonthDate = new Date(thisYear, thisMonthIndex - 1, 1);
+        const prevMonthIndex = prevMonthDate.getMonth();
+        const prevMonthYear = prevMonthDate.getFullYear();
 
-        let thisMonthTotal = 0
-        let prevMonthTotal = 0
+        let thisMonthTotal = 0;
+        let prevMonthTotal = 0;
 
-        const monthlyMap = new Map()
+        const monthlyMap = new Map();
 
         impactTxns.forEach((tx) => {
-          const dateKey = findKey(tx, ["TransactionDate", "TranDate", "Date", "Time"])
-          const dateStr = dateKey ? tx[dateKey] : null
-
-          const carbonKey = findKey(tx, ["CarbonKg", "carbonKg", "Carbon"])
-          const carbonKg = parseAmount(carbonKey ? tx[carbonKey] : 0)
-
-          let d = null
-          if (dateStr) {
-            const parsed = new Date(dateStr)
-            if (!isNaN(parsed.valueOf())) d = parsed
+          // 🔴 Extra safety: ignore donation-like categories
+          const categoryRaw =
+            tx.MerchantCategory ||
+            tx.Category ||
+            tx.category ||
+            "";
+          const isDonation = String(categoryRaw)
+            .toLowerCase()
+            .includes("donation");
+          if (isDonation) {
+            return;
           }
 
-          let monthKey = "Unknown"
+          const dateKey = findKey(tx, [
+            "TransactionDate",
+            "TranDate",
+            "Date",
+            "Time",
+          ]);
+          const dateStr = dateKey ? tx[dateKey] : null;
+
+          const carbonKey = findKey(tx, [
+            "CarbonKg",
+            "carbonKg",
+            "Carbon",
+          ]);
+          const carbonKg = parseAmount(
+            carbonKey ? tx[carbonKey] : 0
+          );
+
+          let d = null;
+          if (dateStr) {
+            const parsed = new Date(dateStr);
+            if (!isNaN(parsed.valueOf())) d = parsed;
+          }
+
+          let monthKey = "Unknown";
           if (d) {
-            const y = d.getFullYear()
-            const m = d.getMonth() + 1
-            monthKey = `${y}-${String(m).padStart(2, "0")}`
+            const y = d.getFullYear();
+            const m = d.getMonth() + 1;
+            monthKey = `${y}-${String(m).padStart(2, "0")}`;
 
             if (y === thisYear && d.getMonth() === thisMonthIndex) {
-              thisMonthTotal += carbonKg
+              thisMonthTotal += carbonKg;
             }
 
             if (y === prevMonthYear && d.getMonth() === prevMonthIndex) {
-              prevMonthTotal += carbonKg
+              prevMonthTotal += carbonKg;
             }
           }
 
           monthlyMap.set(
             monthKey,
             (monthlyMap.get(monthKey) || 0) + carbonKg
-          )
-        })
+          );
+        });
 
-        setCarbonThisMonth(thisMonthTotal)
+        setCarbonThisMonth(thisMonthTotal);
 
-        let carbonDelta = 0
+        let carbonDelta = 0;
         if (prevMonthTotal > 0) {
           carbonDelta =
-            ((thisMonthTotal - prevMonthTotal) / prevMonthTotal) * 100
+            ((thisMonthTotal - prevMonthTotal) / prevMonthTotal) *
+            100;
         }
-        setCarbonChangePct(carbonDelta)
+        setCarbonChangePct(carbonDelta);
 
         const monthlyArray = Array.from(monthlyMap.entries())
           .filter(([key]) => key !== "Unknown")
           .sort((a, b) => {
-            const [ya, ma] = a[0].split("-").map(Number)
-            const [yb, mb] = b[0].split("-").map(Number)
+            const [ya, ma] = a[0].split("-").map(Number);
+            const [yb, mb] = b[0].split("-").map(Number);
             return (
               new Date(ya, ma - 1, 1).getTime() -
               new Date(yb, mb - 1, 1).getTime()
-            )
+            );
           })
           .map(([key, value]) => {
-            const [y, m] = key.split("-").map(Number)
-            const label = new Date(y, m - 1, 1).toLocaleString("default", {
-              month: "short",
-            })
+            const [y, m] = key.split("-").map(Number);
+            const label = new Date(y, m - 1, 1).toLocaleString(
+              "default",
+              {
+                month: "short",
+              }
+            );
             return {
               month: label,
               carbon: Number(Number(value).toFixed(3)),
-            }
-          })
+            };
+          });
 
-        setCarbonTrend(monthlyArray)
+        setCarbonTrend(monthlyArray);
 
         // ===== Spending by category (include ALL negative amounts as spending) =====
-        const spendingMap = new Map()
+        const spendingMap = new Map();
 
         enhancedTx.forEach((tx) => {
-          const amountKey = findKey(tx, ["transactionAmount", "txnAmt", "Amount", "TranAmount", "Amt"])
-          const amount = parseAmount(amountKey ? tx[amountKey] : 0)
-          const category = tx.MerchantCategory || "Donation"
+          const amountKey = findKey(tx, [
+            "transactionAmount",
+            "txnAmt",
+            "Amount",
+            "TranAmount",
+            "Amt",
+          ]);
+          const amount = parseAmount(amountKey ? tx[amountKey] : 0);
+          const category = tx.MerchantCategory || "Donation";
 
-          console.log("Processing tx for spending:", { 
-            transactionId: tx.transactionId, 
-            amount, 
+          console.log("Processing tx for spending:", {
+            transactionId: tx.transactionId,
+            amount,
             category,
             amountKey,
-            rawAmount: amountKey ? tx[amountKey] : "not found"
-          }) // Debug log
+            rawAmount: amountKey ? tx[amountKey] : "not found",
+          }); // Debug log
 
-          // Skip deposits and withdrawals only (not based on amount)
-          if (category === "Deposit" || category === "Withdrawal") {
-            return
+          // 🔴 Skip deposits, withdrawals AND donations from spending breakdown
+          const lower = String(category).toLowerCase();
+          if (
+            category === "Deposit" ||
+            category === "Withdrawal" ||
+            lower.includes("donation")
+          ) {
+            return;
           }
 
           // Include ALL transactions with negative amounts (which represents spending)
           if (amount < 0) {
-            const current = spendingMap.get(category) || 0
-            spendingMap.set(category, current + Math.abs(amount))
+            const current = spendingMap.get(category) || 0;
+            spendingMap.set(category, current + Math.abs(amount));
           }
-        })
+        });
 
-        console.log("Spending map after processing:", spendingMap) // Debug log
+        console.log("Spending map after processing:", spendingMap); // Debug log
 
         let spendingArray = Array.from(spendingMap.entries())
           .sort((a, b) => b[1] - a[1])
@@ -312,35 +365,43 @@ export default function DashboardPage() {
           .map(([category, amount]) => ({
             category,
             amount: Number(amount.toFixed(2)),
-          }))
+          }));
 
-        // If still no data, add some sample data based on your accounts page
+        // If still no data, add some sample data (non-donation only)
         if (spendingArray.length === 0) {
-          console.log("No spending data calculated, using sample data")
+          console.log(
+            "No spending data calculated, using sample data"
+          );
           spendingArray = [
-            { category: "Donation", amount: 4.20 },
-            { category: "Groceries", amount: 1.20 },
-            { category: "Shopping", amount: 5.50 },
-          ]
+            { category: "Groceries", amount: 1.2 },
+            { category: "Shopping", amount: 5.5 },
+            { category: "Transport", amount: 3.0 },
+          ];
         }
 
-        console.log("Final spending array:", spendingArray) // Debug log
-        setSpendingByCategory(spendingArray)
+        console.log("Final spending array:", spendingArray); // Debug log
+        setSpendingByCategory(spendingArray);
       } catch (e) {
-        console.error("Dashboard load error:", e)
-        setError(e.message || "Failed to load dashboard data.")
+        console.error("Dashboard load error:", e);
+        setError(e.message || "Failed to load dashboard data.");
       } finally {
-        setLoading(false)
+        setLoading(false);
       }
-    }
+    };
 
-    loadData()
-  }, [customerId, accountId, categoryMap])
+    loadData();
+  }, [customerId, accountId, categoryMap]);
 
   // Helper functions from accounts page
   const renderAmount = (tx) => {
-    const amountKey = findKey(tx, ["transactionAmount", "txnAmt", "Amount", "TranAmount", "Amt"])
-    const amt = Number(amountKey ? tx[amountKey] : 0)
+    const amountKey = findKey(tx, [
+      "transactionAmount",
+      "txnAmt",
+      "Amount",
+      "TranAmount",
+      "Amt",
+    ]);
+    const amt = Number(amountKey ? tx[amountKey] : 0);
 
     const isCredit =
       tx.accountTo === accountId ||
@@ -371,9 +432,9 @@ export default function DashboardPage() {
       "MerchantName",
       "Description",
       "Narrative",
-    ])
-    return (merchantKey && tx[merchantKey]) || "Transaction"
-  }
+    ]);
+    return (merchantKey && tx[merchantKey]) || "Transaction";
+  };
 
   const balanceDisplay =
     balance === null || isNaN(balance)
@@ -381,16 +442,16 @@ export default function DashboardPage() {
       : balance.toLocaleString("en-SG", {
           style: "currency",
           currency: "SGD",
-        })
+        });
 
   const carbonCardSubtitle =
     carbonChangePct === 0
       ? "Same as last month"
       : `${Math.abs(carbonChangePct).toFixed(1)}% ${
           carbonChangePct < 0 ? "less" : "more"
-        } than last month`
+        } than last month`;
 
-  const pointsToNextReward = Math.max(0, 3000 - loyaltyPoints)
+  const pointsToNextReward = Math.max(0, 3000 - loyaltyPoints);
 
   return (
     <div className="min-h-screen bg-background">
@@ -465,7 +526,9 @@ export default function DashboardPage() {
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">
-                  {pointsLoading ? "—" : loyaltyPoints.toLocaleString("en-SG")}
+                  {pointsLoading
+                    ? "—"
+                    : loyaltyPoints.toLocaleString("en-SG")}
                 </div>
                 <p className="text-xs text-muted-foreground mt-1">
                   {pointsLoading ? (
@@ -479,12 +542,17 @@ export default function DashboardPage() {
                   )}
                 </p>
                 <Progress
-                  value={pointsLoading ? 0 : Math.min(100, (loyaltyPoints / 3000) * 100)}
+                  value={
+                    pointsLoading
+                      ? 0
+                      : Math.min(100, (loyaltyPoints / 3000) * 100)
+                  }
                   className="mt-2"
                 />
                 {pointsError && (
                   <p className="text-xs text-red-600 mt-1">
-                    Error loading points: {String(pointsError.message || pointsError)}
+                    Error loading points:{" "}
+                    {String(pointsError.message || pointsError)}
                   </p>
                 )}
               </CardContent>
@@ -520,18 +588,25 @@ export default function DashboardPage() {
                     }}
                     className="h-[300px]"
                   >
-                    <ResponsiveContainer width="100%" height="100%">
+                    <ResponsiveContainer
+                      width="100%"
+                      height="100%"
+                    >
                       <LineChart data={carbonTrend}>
                         <CartesianGrid strokeDasharray="3 3" />
                         <XAxis dataKey="month" />
                         <YAxis />
-                        <ChartTooltip content={<ChartTooltipContent />} />
+                        <ChartTooltip
+                          content={<ChartTooltipContent />}
+                        />
                         <Line
                           type="monotone"
                           dataKey="carbon"
                           stroke="var(--color-carbon)"
                           strokeWidth={2}
-                          dot={{ fill: "var(--color-carbon)" }}
+                          dot={{
+                            fill: "var(--color-carbon)",
+                          }}
                         />
                       </LineChart>
                     </ResponsiveContainer>
@@ -567,12 +642,17 @@ export default function DashboardPage() {
                     }}
                     className="h-[300px]"
                   >
-                    <ResponsiveContainer width="100%" height="100%">
+                    <ResponsiveContainer
+                      width="100%"
+                      height="100%"
+                    >
                       <BarChart data={spendingByCategory}>
                         <CartesianGrid strokeDasharray="3 3" />
                         <XAxis dataKey="category" />
                         <YAxis />
-                        <ChartTooltip content={<ChartTooltipContent />} />
+                        <ChartTooltip
+                          content={<ChartTooltipContent />}
+                        />
                         <Bar dataKey="amount" radius={[8, 8, 0, 0]} />
                       </BarChart>
                     </ResponsiveContainer>
@@ -608,49 +688,52 @@ export default function DashboardPage() {
                 </p>
               ) : (
                 <div className="space-y-1">
-                  {/* header row - updated to match 4 columns */}
+                  {/* header row - 4 columns */}
                   <div className="grid grid-cols-4 gap-2 text-xs font-medium text-muted-foreground border-b pb-1">
                     <span>Date</span>
-                    <span>Category</span>
+                    {/* <span>Merchant</span> */}
                     <span className="text-right">Amount</span>
-                    <span>Payment</span>
+                    <span className="text-right">Category</span>
                   </div>
-
-                  {recentTransactions.map((tx, idx) => {
-                    const dateKey = findKey(tx, ["transactionDate", "TranDate", "Date", "Time"])
-                    const dateStr = dateKey ? tx[dateKey] : null
-                    const dateLabel = formatDateTime(dateStr)
-                    const merchant = getMerchantName(tx)
-                    
-                    // Use the enhanced category from our processing above
-                    const category = tx.MerchantCategory || "Other"
-                    
-                    // Payment mode: Digital for deposit/withdraw, else whatever tBank returns / Cash
-                    const isDepositOrWithdrawal = category === "Deposit" || category === "Withdrawal";
-                    const paymentMode = isDepositOrWithdrawal ? "Digital" : (tx.paymentMode || "Cash");
-
+                  {recentTransactions.map((tx) => {
+                    const dateKey = findKey(tx, [
+                      "transactionDate",
+                      "TranDate",
+                      "Date",
+                      "Time",
+                    ]);
+                    const dateVal = dateKey ? tx[dateKey] : null;
+                    const category =
+                      tx.MerchantCategory || "Donation";
                     return (
                       <div
-                        key={tx.transactionId || idx}
-                        className="grid grid-cols-4 gap-2 text-sm py-2 border-b last:border-b-0 hover:bg-muted/50 transition-colors"
+                        key={
+                          tx.transactionId ||
+                          `${dateVal}-${Math.random()}`
+                        }
+                        className="grid grid-cols-4 gap-2 py-2 text-sm"
                       >
-                        <span className="text-muted-foreground">{dateLabel}</span>
-                        <span className="text-muted-foreground">{category}</span>
-                        <div className="text-right">{renderAmount(tx)}</div>
-                        <span className="text-muted-foreground text-xs">{paymentMode}</span>
+                        <span className="text-muted-foreground">
+                          {formatDateTime(dateVal)}
+                        </span>
+                        {/* <span className="truncate">
+                          {getMerchantName(tx)}
+                        </span> */}
+                        <span className="text-right">
+                          {renderAmount(tx)}
+                        </span>
+                        <span className="text-right text-muted-foreground">
+                          {category}
+                        </span>
                       </div>
-                    )
+                    );
                   })}
                 </div>
               )}
             </CardContent>
           </Card>
-
-          {error && (
-            <p className="text-sm text-red-500 text-right">{error}</p>
-          )}
         </div>
       </main>
     </div>
-  )
+  );
 }

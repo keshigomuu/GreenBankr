@@ -1,15 +1,15 @@
-"use client"
+"use client";
 
-import { useEffect, useState } from "react"
-import { Navigation } from "@/components/navigation"
+import { useEffect, useState } from "react";
+import { Navigation } from "@/components/navigation";
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card"
-import { Leaf, TrendingDown, TreePine, Droplet } from "lucide-react"
+} from "@/components/ui/card";
+import { Leaf, TrendingDown, TreePine, Droplet } from "lucide-react";
 import {
   Line,
   LineChart,
@@ -19,14 +19,14 @@ import {
   YAxis,
   CartesianGrid,
   ResponsiveContainer,
-} from "recharts"
+} from "recharts";
 import {
   ChartContainer,
   ChartTooltip,
   ChartTooltipContent,
-} from "@/components/ui/chart"
-import { useAuth } from "@/contexts/auth-context"
-import { getCarbonImpact } from "@/lib/impact-api"
+} from "@/components/ui/chart";
+import { useAuth } from "@/contexts/auth-context";
+import { getCarbonImpact } from "@/lib/impact-api";
 
 const ecoTips = [
   {
@@ -57,72 +57,83 @@ const ecoTips = [
       "Shorter showers and efficient appliances can significantly reduce energy consumption.",
     impact: "Save 5 kg CO₂/month",
   },
-]
+];
 
 export default function CarbonImpactPage() {
-  const { user, getCustomerId } = useAuth()
+  const { user, getCustomerId } = useAuth();
 
   const customerId =
     (typeof getCustomerId === "function" && getCustomerId()) ||
     user?.customerId ||
     user?.customerID ||
-    null
+    null;
 
-  const [thisMonthKg, setThisMonthKg] = useState(0)
-  const [changePct, setChangePct] = useState(0)
-  const [totalSavedKg, setTotalSavedKg] = useState(0)
-  const [treesEq, setTreesEq] = useState(0)
-  const [monthlyData, setMonthlyData] = useState([])
-  const [categoryData, setCategoryData] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState("")
+  const [thisMonthKg, setThisMonthKg] = useState(0);
+  const [changePct, setChangePct] = useState(0);
+  const [totalSavedKg, setTotalSavedKg] = useState(0);
+  const [treesEq, setTreesEq] = useState(0);
+  const [monthlyData, setMonthlyData] = useState([]);
+  const [categoryData, setCategoryData] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
   useEffect(() => {
     if (!customerId) {
-      setLoading(false)
-      setError("Please log in to view your carbon impact.")
-      return
+      setLoading(false);
+      setError("Please log in to view your carbon impact.");
+      return;
     }
 
     const loadImpact = async () => {
       try {
-        setLoading(true)
-        setError("")
+        setLoading(true);
+        setError("");
 
-        const impact = await getCarbonImpact(customerId)
-        const raw = impact.raw || {}
+        const impact = await getCarbonImpact(customerId);
+        const raw = impact.raw || {};
 
         // === Totals ===
         const totalSaved =
-          Number(impact.totalCarbonSaved ?? raw.TotalCarbonKg ?? 0) || 0
-        setTotalSavedKg(totalSaved)
+          Number(impact.totalCarbonSaved ?? raw.TotalCarbonKg ?? 0) || 0;
+        setTotalSavedKg(totalSaved);
 
         const transactions =
-          impact.transactions ||
-          raw.Transactions ||
-          []
+          impact.transactions || raw.Transactions || [];
 
         // === Date helpers ===
-        const now = new Date()
-        const thisMonthIndex = now.getMonth()
-        const thisYear = now.getFullYear()
-        const prevMonthDate = new Date(thisYear, thisMonthIndex - 1, 1)
-        const prevMonthIndex = prevMonthDate.getMonth()
-        const prevMonthYear = prevMonthDate.getFullYear()
+        const now = new Date();
+        const thisMonthIndex = now.getMonth();
+        const thisYear = now.getFullYear();
+        const prevMonthDate = new Date(thisYear, thisMonthIndex - 1, 1);
+        const prevMonthIndex = prevMonthDate.getMonth();
+        const prevMonthYear = prevMonthDate.getFullYear();
 
-        let thisMonthTotal = 0
-        let prevMonthTotal = 0
+        let thisMonthTotal = 0;
+        let prevMonthTotal = 0;
 
-        const monthlyMap = new Map()
-        const categoryMap = new Map()
+        const monthlyMap = new Map();
+        const categoryMap = new Map();
 
         transactions.forEach((tx) => {
+          // 🔴 Extra safety: ignore any donation-like categories
+          const categoryRaw =
+            tx.MerchantCategory ||
+            tx.Category ||
+            tx.category ||
+            "Other";
+          const isDonation = String(categoryRaw)
+            .toLowerCase()
+            .includes("donation");
+          if (isDonation) {
+            return;
+          }
+
           const dateStr =
             tx.TransactionDate ||
             tx.transactionDate ||
             tx.Date ||
             tx.date ||
-            null
+            null;
 
           const carbonKg =
             Number(
@@ -131,109 +142,110 @@ export default function CarbonImpactPage() {
                 tx.Carbon ??
                 tx.carbon ??
                 0
-            ) || 0
+            ) || 0;
 
-          let d = null
+          let d = null;
           if (dateStr) {
-            const parsed = new Date(dateStr)
+            const parsed = new Date(dateStr);
             if (!isNaN(parsed.valueOf())) {
-              d = parsed
+              d = parsed;
             }
           }
 
           // === Monthly aggregation ===
-          let monthKey = "Unknown"
+          let monthKey = "Unknown";
           if (d) {
-            const y = d.getFullYear()
-            const m = d.getMonth() + 1
-            monthKey = `${y}-${String(m).padStart(2, "0")}`
+            const y = d.getFullYear();
+            const m = d.getMonth() + 1;
+            monthKey = `${y}-${String(m).padStart(2, "0")}`;
 
             if (y === thisYear && d.getMonth() === thisMonthIndex) {
-              thisMonthTotal += carbonKg
+              thisMonthTotal += carbonKg;
             }
 
             if (y === prevMonthYear && d.getMonth() === prevMonthIndex) {
-              prevMonthTotal += carbonKg
+              prevMonthTotal += carbonKg;
             }
           }
 
           monthlyMap.set(
             monthKey,
             (monthlyMap.get(monthKey) || 0) + carbonKg
-          )
+          );
 
-          // === Category aggregation ===
-          const category =
-            tx.MerchantCategory ||
-            tx.Category ||
-            tx.category ||
-            "Other"
+          // === Category aggregation (non-donation only) ===
           categoryMap.set(
-            category,
-            (categoryMap.get(category) || 0) + carbonKg
-          )
-        })
+            categoryRaw,
+            (categoryMap.get(categoryRaw) || 0) + carbonKg
+          );
+        });
 
-        setThisMonthKg(thisMonthTotal)
+        setThisMonthKg(thisMonthTotal);
 
-        let change = 0
+        let change = 0;
         if (prevMonthTotal > 0) {
           change =
-            ((thisMonthTotal - prevMonthTotal) / prevMonthTotal) * 100
+            ((thisMonthTotal - prevMonthTotal) / prevMonthTotal) * 100;
         }
-        setChangePct(change)
+        setChangePct(change);
 
         const trees =
           raw.TreesEquivalent ??
           raw.TreeEquivalent ??
-          (totalSaved > 0 ? totalSaved / 20 : 0)
-        setTreesEq(Number(trees) || 0)
+          (totalSaved > 0 ? totalSaved / 20 : 0);
+        setTreesEq(Number(trees) || 0);
 
         const monthlyArray = Array.from(monthlyMap.entries())
           .filter(([key]) => key !== "Unknown")
           .sort((a, b) => {
-            const [ya, ma] = a[0].split("-").map(Number)
-            const [yb, mb] = b[0].split("-").map(Number)
-            return new Date(ya, ma - 1, 1) - new Date(yb, mb - 1, 1)
+            const [ya, ma] = a[0].split("-").map(Number);
+            const [yb, mb] = b[0].split("-").map(Number);
+            return (
+              new Date(ya, ma - 1, 1) -
+              new Date(yb, mb - 1, 1)
+            );
           })
           .map(([key, value]) => {
-            const [y, m] = key.split("-").map(Number)
-            const label = new Date(y, m - 1, 1).toLocaleString("default", {
-              month: "short",
-            })
+            const [y, m] = key.split("-").map(Number);
+            const label = new Date(y, m - 1, 1).toLocaleString(
+              "default",
+              {
+                month: "short",
+              }
+            );
             return {
               month: label,
               carbon: Number(value.toFixed(3)),
-            }
-          })
+            };
+          });
 
-        setMonthlyData(monthlyArray)
+        setMonthlyData(monthlyArray);
 
         const categoryArray = Array.from(categoryMap.entries())
           .sort((a, b) => b[1] - a[1])
           .map(([category, value]) => ({
             category,
             carbon: Number(value.toFixed(3)),
-          }))
+          }));
 
-        setCategoryData(categoryArray)
+        setCategoryData(categoryArray);
       } catch (e) {
-        console.error("Failed to load carbon impact:", e)
-        setError(e.message || "Failed to load carbon impact.")
+        console.error("Failed to load carbon impact:", e);
+        setError(e.message || "Failed to load carbon impact.");
       } finally {
-        setLoading(false)
+        setLoading(false);
       }
-    }
+    };
 
-    loadImpact()
-  }, [customerId])
+    loadImpact();
+  }, [customerId]);
 
   const changeText =
     changePct === 0
       ? "Same as last month"
       : `${Math.abs(changePct).toFixed(1)}% ${
           changePct < 0 ? "less" : "more"
-        } than last month`
+        } than last month`;
 
   return (
     <div className="min-h-screen bg-background">
@@ -273,7 +285,9 @@ export default function CarbonImpactPage() {
                   </p>
                 )}
                 {!loading && error && (
-                  <p className="text-xs text-red-500 mt-1">{error}</p>
+                  <p className="text-xs text-red-500 mt-1">
+                    {error}
+                  </p>
                 )}
               </CardContent>
             </Card>
@@ -305,7 +319,9 @@ export default function CarbonImpactPage() {
             <Card>
               <CardHeader>
                 <CardTitle>Carbon Footprint Trend</CardTitle>
-                <CardDescription>Monthly carbon emissions</CardDescription>
+                <CardDescription>
+                  Monthly carbon emissions
+                </CardDescription>
               </CardHeader>
               <CardContent>
                 {loading ? (
@@ -328,18 +344,25 @@ export default function CarbonImpactPage() {
                     }}
                     className="h-[300px]"
                   >
-                    <ResponsiveContainer width="100%" height="100%">
+                    <ResponsiveContainer
+                      width="100%"
+                      height="100%"
+                    >
                       <LineChart data={monthlyData}>
                         <CartesianGrid strokeDasharray="3 3" />
                         <XAxis dataKey="month" />
                         <YAxis />
-                        <ChartTooltip content={<ChartTooltipContent />} />
+                        <ChartTooltip
+                          content={<ChartTooltipContent />}
+                        />
                         <Line
                           type="monotone"
                           dataKey="carbon"
                           stroke="var(--color-carbon)"
                           strokeWidth={2}
-                          dot={{ fill: "var(--color-carbon)" }}
+                          dot={{
+                            fill: "var(--color-carbon)",
+                          }}
                         />
                       </LineChart>
                     </ResponsiveContainer>
@@ -376,8 +399,14 @@ export default function CarbonImpactPage() {
                     }}
                     className="h-[300px]"
                   >
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={categoryData} layout="vertical">
+                    <ResponsiveContainer
+                      width="100%"
+                      height="100%"
+                    >
+                      <BarChart
+                        data={categoryData}
+                        layout="vertical"
+                      >
                         <CartesianGrid strokeDasharray="3 3" />
                         <XAxis type="number" />
                         <YAxis
@@ -385,7 +414,9 @@ export default function CarbonImpactPage() {
                           type="category"
                           width={80}
                         />
-                        <ChartTooltip content={<ChartTooltipContent />} />
+                        <ChartTooltip
+                          content={<ChartTooltipContent />}
+                        />
                         <Bar
                           dataKey="carbon"
                           radius={[0, 8, 8, 0]}
@@ -409,7 +440,7 @@ export default function CarbonImpactPage() {
             <CardContent>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {ecoTips.map((tip, index) => {
-                  const Icon = tip.icon
+                  const Icon = tip.icon;
                   return (
                     <div
                       key={index}
@@ -432,7 +463,7 @@ export default function CarbonImpactPage() {
                         </div>
                       </div>
                     </div>
-                  )
+                  );
                 })}
               </div>
             </CardContent>
@@ -440,5 +471,5 @@ export default function CarbonImpactPage() {
         </div>
       </main>
     </div>
-  )
+  );
 }
