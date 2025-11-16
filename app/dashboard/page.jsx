@@ -37,6 +37,7 @@ import { useAuth } from "@/contexts/auth-context"
 import {
   getDepositBalance,
   getTransactionHistory,
+  getTransactionCategories,
 } from "@/lib/account-api"
 import { getCarbonImpact } from "@/lib/impact-api"
 import { useLoyaltyPoints } from "@/hooks/useLoyalty"
@@ -68,7 +69,7 @@ function parseAmount(value) {
 }
 
 export default function DashboardPage() {
-  const { user, getCustomerId } = useAuth()
+  const { user, getCustomerId, getDepositAccount } = useAuth()
 
   const customerId =
     (typeof getCustomerId === "function" && getCustomerId()) ||
@@ -76,7 +77,8 @@ export default function DashboardPage() {
     user?.customerID ||
     null
 
-  const accountId = user?.depositAccount || user?.accountId || null
+  const accountId = user?.depositAccount || user?.accountId || 
+    getDepositAccount?.() || user?.raw?.DepositeAcct || null
 
   const [balance, setBalance] = useState(null)
   const [balanceChangePct, setBalanceChangePct] = useState(0)
@@ -88,6 +90,7 @@ export default function DashboardPage() {
   const [spendingByCategory, setSpendingByCategory] = useState([])
   const [error, setError] = useState(null)
   const [recentTransactions, setRecentTransactions] = useState([])
+  const [categoryMap, setCategoryMap] = useState({})
 
   const [loading, setLoading] = useState(true)
 
@@ -106,6 +109,19 @@ export default function DashboardPage() {
     : 0
 
   const loyaltyPoints = Math.max((donatedPoints ?? 0) - totalSpent, 0)
+
+  // Load saved category map from localStorage
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const saved = localStorage.getItem("txnCategories");
+      if (saved) {
+        setCategoryMap(JSON.parse(saved));
+      }
+    } catch (e) {
+      console.warn("Failed to parse txnCategories from localStorage", e);
+    }
+  }, []);
 
   useEffect(() => {
     if (!customerId || !accountId) {
@@ -137,6 +153,45 @@ export default function DashboardPage() {
         setBalance(Number(bal) || 0)
         // Placeholder % change (until you have historical balances)
         setBalanceChangePct(12.5)
+
+        // ===== Process transactions with categories =====
+        // Sort newest → oldest (fix the date field access)
+        const sortedTx = [...txns].sort((a, b) => {
+          const dateKeyA = findKey(a, ["transactionDate", "TranDate", "Date", "Time"])
+          const dateKeyB = findKey(b, ["transactionDate", "TranDate", "Date", "Time"])
+          const da = dateKeyA ? new Date(a[dateKeyA]).getTime() : 0
+          const db = dateKeyB ? new Date(b[dateKeyB]).getTime() : 0
+          return db - da
+        })
+
+        // Get categories for transactions (same as accounts page)
+        const ids = sortedTx
+          .map((tx) => tx.transactionId)
+          .filter(Boolean);
+
+        let serverCategories = {};
+        try {
+          serverCategories = await getTransactionCategories(ids);
+        } catch (e) {
+          console.warn("Failed to load server categories", e);
+        }
+
+        // Enhanced transactions with categories (use EXACT same logic as accounts page)
+        const enhancedTx = sortedTx.map((tx) => {
+          const tid = tx.transactionId;
+          return {
+            ...tx,
+            MerchantCategory:
+              tx.MerchantCategory || // from API if ever present
+              tx.merchantCategory || // any variant
+              serverCategories[tid] || // from Node store
+              categoryMap[tid] || // localStorage fallback
+              "Donation", // Default to "Donation" like accounts page, not null
+          };
+        });
+
+        // Recent 6 transactions for dashboard
+        setRecentTransactions(enhancedTx.slice(0, 6))
 
         // ===== Carbon impact (this month + trend) =====
         const rawImpact = impact.raw || {}
@@ -221,31 +276,16 @@ export default function DashboardPage() {
 
         setCarbonTrend(monthlyArray)
 
-        // ===== Transactions → spending by category + recent list =====
-        const sortedTx = [...txns].sort((a, b) => {
-          const dateKeyA = findKey(a, ["TransactionDate", "TranDate", "Date", "Time"])
-          const dateKeyB = findKey(b, ["TransactionDate", "TranDate", "Date", "Time"])
-          const da = dateKeyA ? new Date(a[dateKeyA]).getTime() : 0
-          const db = dateKeyB ? new Date(b[dateKeyB]).getTime() : 0
-          return db - da
-        })
-
-        // Recent 4
-        setRecentTransactions(sortedTx.slice(0, 4))
-
-        // Spending by category (only negative amounts = expenses)
+        // ===== Spending by category (only negative amounts = expenses) =====
         const spendingMap = new Map()
 
-        sortedTx.forEach((tx) => {
-          const amountKey = findKey(tx, ["Amount", "TranAmount", "Amt"])
+        enhancedTx.forEach((tx) => {
+          const amountKey = findKey(tx, ["transactionAmount", "txnAmt", "Amount", "TranAmount", "Amt"])
           const amount = parseAmount(amountKey ? tx[amountKey] : 0)
 
           if (amount >= 0) return // ignore income
 
-          const categoryKey = findKey(tx, ["Category", "MerchantCategory"])
-          const category =
-            (categoryKey && tx[categoryKey]) || "Other"
-
+          const category = tx.MerchantCategory || "Other"
           const current = spendingMap.get(category) || 0
           spendingMap.set(category, current + Math.abs(amount))
         })
@@ -268,7 +308,45 @@ export default function DashboardPage() {
     }
 
     loadData()
-  }, [customerId, accountId])
+  }, [customerId, accountId, categoryMap])
+
+  // Helper functions from accounts page
+  const renderAmount = (tx) => {
+    const amountKey = findKey(tx, ["transactionAmount", "txnAmt", "Amount", "TranAmount", "Amt"])
+    const amt = Number(amountKey ? tx[amountKey] : 0)
+
+    const isCredit =
+      tx.accountTo === accountId ||
+      String(tx.transactionType) === "200" ||
+      tx.Recieving_Acct_Id === accountId;
+
+    const sign = isCredit ? "+" : "-";
+    const display = `${sign}$${Math.abs(amt).toFixed(2)}`;
+    const colorClass = isCredit ? "text-primary" : "text-foreground";
+
+    return (
+      <span className={`font-semibold ${colorClass}`}>{display}</span>
+    );
+  };
+
+  const formatDateTime = (iso) => {
+    if (!iso) return "—";
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return iso;
+    return d.toLocaleDateString("en-SG", {
+      day: "2-digit",
+      month: "short",
+    });
+  };
+
+  const getMerchantName = (tx) => {
+    const merchantKey = findKey(tx, [
+      "MerchantName",
+      "Description",
+      "Narrative",
+    ])
+    return (merchantKey && tx[merchantKey]) || "Transaction"
+  }
 
   const balanceDisplay =
     balance === null || isNaN(balance)
@@ -350,7 +428,7 @@ export default function DashboardPage() {
               </CardContent>
             </Card>
 
-            {/* Rewards Points (now using the same calculation as rewards page) */}
+            {/* Rewards Points */}
             <Card>
               <CardHeader className="flex flex-row items-center justify-between pb-2">
                 <CardTitle className="text-sm font-medium text-muted-foreground">
@@ -477,7 +555,7 @@ export default function DashboardPage() {
             </Card>
           </div>
 
-          {/* Recent Transactions */}
+          {/* Recent Transactions - Updated to match accounts page style */}
           <Card>
             <CardHeader>
               <div className="flex items-center justify-between">
@@ -487,8 +565,8 @@ export default function DashboardPage() {
                     Your latest financial activity
                   </CardDescription>
                 </div>
-                <Button variant="outline" size="sm">
-                  View All
+                <Button variant="outline" size="sm" asChild>
+                  <a href="/accounts">View All</a>
                 </Button>
               </div>
             </CardHeader>
@@ -502,88 +580,37 @@ export default function DashboardPage() {
                   No transactions yet.
                 </p>
               ) : (
-                <div className="space-y-4">
+                <div className="space-y-1">
+                  {/* header row - updated to match 4 columns */}
+                  <div className="grid grid-cols-4 gap-2 text-xs font-medium text-muted-foreground border-b pb-1">
+                    <span>Date</span>
+                    <span>Category</span>
+                    <span className="text-right">Amount</span>
+                    <span>Payment</span>
+                  </div>
+
                   {recentTransactions.map((tx, idx) => {
-                    const amountKey = findKey(tx, ["Amount", "TranAmount", "Amt"])
-                    const amount = parseAmount(amountKey ? tx[amountKey] : 0)
-
-                    const merchantKey = findKey(tx, [
-                      "MerchantName",
-                      "Description",
-                      "Narrative",
-                    ])
-                    const merchant =
-                      (merchantKey && tx[merchantKey]) || "Transaction"
-
-                    const categoryKey = findKey(tx, [
-                      "Category",
-                      "MerchantCategory",
-                    ])
-                    const category =
-                      (categoryKey && tx[categoryKey]) || "Other"
-
-                    const dateKey = findKey(tx, [
-                      "TransactionDate",
-                      "TranDate",
-                      "Date",
-                      "Time",
-                    ])
+                    const dateKey = findKey(tx, ["transactionDate", "TranDate", "Date", "Time"])
                     const dateStr = dateKey ? tx[dateKey] : null
-
-                    let dateLabel = ""
-                    if (dateStr) {
-                      const d = new Date(dateStr)
-                      if (!isNaN(d.valueOf())) {
-                        dateLabel = d.toLocaleDateString("en-SG", {
-                          day: "2-digit",
-                          month: "short",
-                        })
-                      }
-                    }
-
-                    const isCredit = amount > 0
+                    const dateLabel = formatDateTime(dateStr)
+                    const merchant = getMerchantName(tx)
+                    
+                    // Use the enhanced category from our processing above
+                    const category = tx.MerchantCategory || "Other"
+                    
+                    // Payment mode: Digital for deposit/withdraw, else whatever tBank returns / Cash
+                    const isDepositOrWithdrawal = category === "Deposit" || category === "Withdrawal";
+                    const paymentMode = isDepositOrWithdrawal ? "Digital" : (tx.paymentMode || "Cash");
 
                     return (
                       <div
-                        key={idx}
-                        className="flex items-center justify-between p-4 rounded-lg border border-border hover:bg-muted/50 transition-colors"
+                        key={tx.transactionId || idx}
+                        className="grid grid-cols-4 gap-2 text-sm py-2 border-b last:border-b-0 hover:bg-muted/50 transition-colors"
                       >
-                        <div className="flex items-center gap-4">
-                          <div
-                            className={`w-10 h-10 rounded-full flex items-center justify-center ${
-                              isCredit ? "bg-primary/10" : "bg-muted"
-                            }`}
-                          >
-                            {isCredit ? (
-                              <ArrowUpRight className="w-5 h-5 text-primary" />
-                            ) : (
-                              <ArrowDownRight className="w-5 h-5 text-foreground" />
-                            )}
-                          </div>
-                          <div>
-                            <p className="font-medium text-foreground">
-                              {merchant}
-                            </p>
-                            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                              <span>{category}</span>
-                            </div>
-                          </div>
-                        </div>
-                        <div className="text-right">
-                          <p
-                            className={`font-semibold ${
-                              isCredit ? "text-primary" : "text-foreground"
-                            }`}
-                          >
-                            {amount > 0 ? "+" : "-"}
-                            {Math.abs(amount).toFixed(2)}
-                          </p>
-                          {dateLabel && (
-                            <p className="text-sm text-muted-foreground">
-                              {dateLabel}
-                            </p>
-                          )}
-                        </div>
+                        <span className="text-muted-foreground">{dateLabel}</span>
+                        <span className="text-muted-foreground">{category}</span>
+                        <div className="text-right">{renderAmount(tx)}</div>
+                        <span className="text-muted-foreground text-xs">{paymentMode}</span>
                       </div>
                     )
                   })}
