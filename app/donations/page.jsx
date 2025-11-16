@@ -29,6 +29,7 @@ import {
   useDonationPreference,
   savePreference,
 } from "@/hooks/useDonationPreference";
+import { OrganisationsAPI } from "@/lib/organisations-api";
 
 export default function DonationsPage() {
   const { getCustomerId } = useAuth();
@@ -68,9 +69,7 @@ export default function DonationsPage() {
     if (!prefName) return "";
 
     // 1) Exact match
-    let match = orgs.find(
-      (o) => normalise(o.Name) === prefName
-    );
+    let match = orgs.find((o) => normalise(o.Name) === prefName);
     if (match) return String(match.OrganisationId);
 
     // 2) Contains
@@ -91,8 +90,10 @@ export default function DonationsPage() {
 
     console.warn(
       "⚠️ Could not map OutSystems preference name → organisationId\n",
-      "Returned name:", prefNameRaw,
-      "\nAvailable organisations:", orgs.map(o => o.Name)
+      "Returned name:",
+      prefNameRaw,
+      "\nAvailable organisations:",
+      orgs.map((o) => o.Name)
     );
 
     return "";
@@ -107,6 +108,19 @@ export default function DonationsPage() {
     return d.toISOString().split("T")[0];
   }
 
+  const [envOrgs, setEnvOrgs] = useState([]);
+  useEffect(() => {
+    async function load() {
+      try {
+        const list = await OrganisationsAPI.getEnvOrganisations();
+        setEnvOrgs(list);
+      } catch (err) {
+        console.error("Failed to load environmental orgs", err);
+      }
+    }
+    load();
+  }, []);
+
   // ============================================================
   // LOAD ORGANISATIONS
   // ============================================================
@@ -120,7 +134,7 @@ export default function DonationsPage() {
         const uniq = [];
         const seen = new Set();
 
-        for (const o of data.organisations || []) {
+        for (const o of (data.organisations || [])) {
           if (!seen.has(o.OrganisationId)) {
             seen.add(o.OrganisationId);
             uniq.push(o);
@@ -196,10 +210,6 @@ export default function DonationsPage() {
     setPrefOrgId(prefOrgId);
 
     setShowPrefModal(false);
-
-    // We do NOT immediately refresh preference from backend here
-    // to avoid flickering back to any stale value. On the next
-    // page load, the saved preference will be applied via GET.
   };
 
   const totalDonated = useMemo(
@@ -216,7 +226,6 @@ export default function DonationsPage() {
 
       <main className="md:ml-64 p-4 md:p-8 pt-20 md:pt-8">
         <div className="max-w-7xl mx-auto space-y-6">
-
           {/* HEADER */}
           <div className="flex items-center justify-between">
             <div>
@@ -291,7 +300,10 @@ export default function DonationsPage() {
                     </SelectTrigger>
                     <SelectContent>
                       {orgs.map((o) => (
-                        <SelectItem key={o.OrganisationId} value={String(o.OrganisationId)}>
+                        <SelectItem
+                          key={o.OrganisationId}
+                          value={String(o.OrganisationId)}
+                        >
                           {o.Name}
                         </SelectItem>
                       ))}
@@ -317,28 +329,52 @@ export default function DonationsPage() {
           </div>
 
           {/* Featured Orgs */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Featured Organisations</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {orgsError ? (
-                <p className="text-red-500">{orgsError}</p>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {orgs.map((o) => (
-                    <div key={o.OrganisationId} className="p-4 border rounded-lg">
-                      <div className="font-semibold">{o.Name}</div>
-                      <Button className="mt-3 w-full" onClick={() => setOrgId(String(o.OrganisationId))}>
-                        <Heart className="w-4 h-4 mr-2" />
-                        Donate to {o.Name}
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {envOrgs.map((org) => (
+              <Card key={org.id}>
+                <CardHeader>
+                  <CardTitle>{org.name}</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {org.logoUrl && (
+                    <img
+                      src={org.logoUrl}
+                      alt={org.name}
+                      className="h-20 mb-4 rounded"
+                    />
+                  )}
+
+                  <p className="text-sm text-gray-600 mb-2">
+                    {org.description}
+                  </p>
+
+                  <a
+                    href={org.websiteUrl}
+                    target="_blank"
+                    className="text-blue-600 underline"
+                  >
+                    Visit Website
+                  </a>
+
+                  {/* 🔽 BUTTON NOW MATCHES "DONATE NOW" DESIGN */}
+                  <Button
+                    type="button"
+                    className="w-full mt-4"
+                    onClick={() => {
+                      // Optional: auto-select this org in the "Give Today" dropdown
+                      const match = orgs.find(
+                        (o) => normalise(o.Name) === normalise(org.name)
+                      );
+                      if (match) setOrgId(String(match.OrganisationId));
+                    }}
+                  >
+                    <Heart className="w-4 h-4 mr-2" />
+                    Donate to {org.name}
+                  </Button>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
 
           {/* Donation History */}
           <Card>
@@ -353,9 +389,14 @@ export default function DonationsPage() {
                       (o) => String(o.OrganisationId) === String(d.orgId)
                     );
                     return (
-                      <div key={d.id} className="p-4 border rounded-lg flex items-center justify-between">
+                      <div
+                        key={d.id}
+                        className="p-4 border rounded-lg flex items-center justify-between"
+                      >
                         <div>
-                          <p className="font-medium">{org?.Name || "Sustainability Fund"}</p>
+                          <p className="font-medium">
+                            {org?.Name || "Sustainability Fund"}
+                          </p>
                           <p className="text-sm text-muted-foreground">
                             {formatDate(d.date)}
                           </p>
@@ -406,7 +447,10 @@ export default function DonationsPage() {
               </Select>
 
               <div className="flex justify-end gap-3 mt-4">
-                <Button variant="outline" onClick={() => setShowPrefModal(false)}>
+                <Button
+                  variant="outline"
+                  onClick={() => setShowPrefModal(false)}
+                >
                   Cancel
                 </Button>
                 <Button onClick={onSavePreference}>Save Preference</Button>

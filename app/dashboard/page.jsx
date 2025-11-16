@@ -1,38 +1,292 @@
 "use client"
 
+import { useEffect, useState } from "react"
 import { Navigation } from "@/components/navigation"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
-import { ArrowUpRight, ArrowDownRight, Leaf, TrendingUp, DollarSign, Gift } from "lucide-react"
-import { Line, LineChart, Bar, BarChart, XAxis, YAxis, CartesianGrid, ResponsiveContainer } from "recharts"
-import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart.jsx"
+import {
+  ArrowUpRight,
+  ArrowDownRight,
+  Leaf,
+  DollarSign,
+  Gift,
+} from "lucide-react"
+import {
+  Line,
+  LineChart,
+  Bar,
+  BarChart,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  ResponsiveContainer,
+} from "recharts"
+import {
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+} from "@/components/ui/chart"
+import { useAuth } from "@/contexts/auth-context"
+import {
+  getDepositBalance,
+  getTransactionHistory,
+} from "@/lib/account-api"
+import { getCarbonImpact } from "@/lib/impact-api"
+import { useLoyaltyPoints } from "@/hooks/useLoyalty"
+import { useMyClaims } from "@/hooks/useRewards"
 
-const carbonData = [
-  { month: "Jan", carbon: 45 },
-  { month: "Feb", carbon: 52 },
-  { month: "Mar", carbon: 38 },
-  { month: "Apr", carbon: 42 },
-  { month: "May", carbon: 35 },
-  { month: "Jun", carbon: 30 },
-]
+/**
+ * Helper to find a key in an object whose name matches any of the
+ * provided regex patterns (case-insensitive).
+ */
+function findKey(obj, regexes) {
+  const keys = Object.keys(obj || {})
+  for (const re of regexes) {
+    const regex = new RegExp(re, "i")
+    const match = keys.find((k) => regex.test(k))
+    if (match) return match
+  }
+  return null
+}
 
-const spendingData = [
-  { category: "Food", amount: 450, carbon: 12 },
-  { category: "Transport", amount: 320, carbon: 28 },
-  { category: "Shopping", amount: 280, carbon: 15 },
-  { category: "Utilities", amount: 180, carbon: 8 },
-  { category: "Entertainment", amount: 150, carbon: 5 },
-]
-
-const recentTransactions = [
-  { id: 1, merchant: "Whole Foods Market", amount: -45.32, category: "Food", carbon: 1.2, date: "Today" },
-  { id: 2, merchant: "Electric Vehicle Charge", amount: -12.5, category: "Transport", carbon: 0.5, date: "Today" },
-  { id: 3, merchant: "Salary Deposit", amount: 3500.0, category: "Income", carbon: 0, date: "Yesterday" },
-  { id: 4, merchant: "Local Farmers Market", amount: -28.75, category: "Food", carbon: 0.8, date: "2 days ago" },
-]
+/**
+ * Helper to safely parse a numeric amount (strip $ and commas).
+ */
+function parseAmount(value) {
+  if (value === null || value === undefined) return 0
+  const str = String(value)
+  const cleaned = str.replace(/[^0-9.\-]/g, "")
+  const num = Number(cleaned)
+  return isNaN(num) ? 0 : num
+}
 
 export default function DashboardPage() {
+  const { user, getCustomerId } = useAuth()
+
+  const customerId =
+    (typeof getCustomerId === "function" && getCustomerId()) ||
+    user?.customerId ||
+    user?.customerID ||
+    null
+
+  const accountId = user?.depositAccount || user?.accountId || null
+
+  const [balance, setBalance] = useState(null)
+  const [balanceChangePct, setBalanceChangePct] = useState(0)
+
+  const [carbonThisMonth, setCarbonThisMonth] = useState(0)
+  const [carbonChangePct, setCarbonChangePct] = useState(0)
+  const [carbonTrend, setCarbonTrend] = useState([])
+
+  const [spendingByCategory, setSpendingByCategory] = useState([])
+  const [error, setError] = useState(null)
+  const [recentTransactions, setRecentTransactions] = useState([])
+
+  const [loading, setLoading] = useState(true)
+
+  // Use the same loyalty data source as rewards page
+  const {
+    points: donatedPoints, // lifetime donated points
+    loading: pointsLoading,
+    error: pointsError,
+  } = useLoyaltyPoints(customerId)
+
+  const { claims } = useMyClaims(customerId)
+
+  // Calculate current points the same way as rewards page
+  const totalSpent = Array.isArray(claims) 
+    ? claims.reduce((s, c) => s + Number(c.pointsCost || 0), 0) 
+    : 0
+
+  const loyaltyPoints = Math.max((donatedPoints ?? 0) - totalSpent, 0)
+
+  useEffect(() => {
+    if (!customerId || !accountId) {
+      setLoading(false)
+      setError("Please log in to view your dashboard.")
+      return
+    }
+
+    const loadData = async () => {
+      try {
+        setLoading(true)
+        setError(null)
+
+        // Last ~3 months of transactions
+        const end = new Date()
+        const start = new Date()
+        start.setMonth(start.getMonth() - 3)
+
+        const startDate = start.toISOString().slice(0, 10)
+        const endDate = end.toISOString().slice(0, 10)
+
+        const [bal, txns, impact] = await Promise.all([
+          getDepositBalance(customerId, accountId),
+          getTransactionHistory(accountId, startDate, endDate),
+          getCarbonImpact(customerId),
+        ])
+
+        // ===== Account balance =====
+        setBalance(Number(bal) || 0)
+        // Placeholder % change (until you have historical balances)
+        setBalanceChangePct(12.5)
+
+        // ===== Carbon impact (this month + trend) =====
+        const rawImpact = impact.raw || {}
+        const impactTxns =
+          impact.transactions || rawImpact.Transactions || []
+
+        const now = new Date()
+        const thisMonthIndex = now.getMonth()
+        const thisYear = now.getFullYear()
+        const prevMonthDate = new Date(thisYear, thisMonthIndex - 1, 1)
+        const prevMonthIndex = prevMonthDate.getMonth()
+        const prevMonthYear = prevMonthDate.getFullYear()
+
+        let thisMonthTotal = 0
+        let prevMonthTotal = 0
+
+        const monthlyMap = new Map()
+
+        impactTxns.forEach((tx) => {
+          const dateKey = findKey(tx, ["TransactionDate", "TranDate", "Date", "Time"])
+          const dateStr = dateKey ? tx[dateKey] : null
+
+          const carbonKey = findKey(tx, ["CarbonKg", "carbonKg", "Carbon"])
+          const carbonKg = parseAmount(carbonKey ? tx[carbonKey] : 0)
+
+          let d = null
+          if (dateStr) {
+            const parsed = new Date(dateStr)
+            if (!isNaN(parsed.valueOf())) d = parsed
+          }
+
+          let monthKey = "Unknown"
+          if (d) {
+            const y = d.getFullYear()
+            const m = d.getMonth() + 1
+            monthKey = `${y}-${String(m).padStart(2, "0")}`
+
+            if (y === thisYear && d.getMonth() === thisMonthIndex) {
+              thisMonthTotal += carbonKg
+            }
+
+            if (y === prevMonthYear && d.getMonth() === prevMonthIndex) {
+              prevMonthTotal += carbonKg
+            }
+          }
+
+          monthlyMap.set(
+            monthKey,
+            (monthlyMap.get(monthKey) || 0) + carbonKg
+          )
+        })
+
+        setCarbonThisMonth(thisMonthTotal)
+
+        let carbonDelta = 0
+        if (prevMonthTotal > 0) {
+          carbonDelta =
+            ((thisMonthTotal - prevMonthTotal) / prevMonthTotal) * 100
+        }
+        setCarbonChangePct(carbonDelta)
+
+        const monthlyArray = Array.from(monthlyMap.entries())
+          .filter(([key]) => key !== "Unknown")
+          .sort((a, b) => {
+            const [ya, ma] = a[0].split("-").map(Number)
+            const [yb, mb] = b[0].split("-").map(Number)
+            return (
+              new Date(ya, ma - 1, 1).getTime() -
+              new Date(yb, mb - 1, 1).getTime()
+            )
+          })
+          .map(([key, value]) => {
+            const [y, m] = key.split("-").map(Number)
+            const label = new Date(y, m - 1, 1).toLocaleString("default", {
+              month: "short",
+            })
+            return {
+              month: label,
+              carbon: Number(Number(value).toFixed(3)),
+            }
+          })
+
+        setCarbonTrend(monthlyArray)
+
+        // ===== Transactions → spending by category + recent list =====
+        const sortedTx = [...txns].sort((a, b) => {
+          const dateKeyA = findKey(a, ["TransactionDate", "TranDate", "Date", "Time"])
+          const dateKeyB = findKey(b, ["TransactionDate", "TranDate", "Date", "Time"])
+          const da = dateKeyA ? new Date(a[dateKeyA]).getTime() : 0
+          const db = dateKeyB ? new Date(b[dateKeyB]).getTime() : 0
+          return db - da
+        })
+
+        // Recent 4
+        setRecentTransactions(sortedTx.slice(0, 4))
+
+        // Spending by category (only negative amounts = expenses)
+        const spendingMap = new Map()
+
+        sortedTx.forEach((tx) => {
+          const amountKey = findKey(tx, ["Amount", "TranAmount", "Amt"])
+          const amount = parseAmount(amountKey ? tx[amountKey] : 0)
+
+          if (amount >= 0) return // ignore income
+
+          const categoryKey = findKey(tx, ["Category", "MerchantCategory"])
+          const category =
+            (categoryKey && tx[categoryKey]) || "Other"
+
+          const current = spendingMap.get(category) || 0
+          spendingMap.set(category, current + Math.abs(amount))
+        })
+
+        const spendingArray = Array.from(spendingMap.entries())
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 6)
+          .map(([category, amount]) => ({
+            category,
+            amount: Number(amount.toFixed(2)),
+          }))
+
+        setSpendingByCategory(spendingArray)
+      } catch (e) {
+        console.error("Dashboard load error:", e)
+        setError(e.message || "Failed to load dashboard data.")
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    loadData()
+  }, [customerId, accountId])
+
+  const balanceDisplay =
+    balance === null || isNaN(balance)
+      ? "—"
+      : balance.toLocaleString("en-SG", {
+          style: "currency",
+          currency: "SGD",
+        })
+
+  const carbonCardSubtitle =
+    carbonChangePct === 0
+      ? "Same as last month"
+      : `${Math.abs(carbonChangePct).toFixed(1)}% ${
+          carbonChangePct < 0 ? "less" : "more"
+        } than last month`
+
+  const pointsToNextReward = Math.max(0, 3000 - loyaltyPoints)
+
   return (
     <div className="min-h-screen bg-background">
       <Navigation />
@@ -41,97 +295,143 @@ export default function DashboardPage() {
         <div className="max-w-7xl mx-auto space-y-8">
           {/* Header */}
           <div>
-            <h1 className="text-3xl font-bold text-foreground">Dashboard</h1>
-            <p className="text-muted-foreground mt-1">Welcome back! Here's your sustainable banking overview.</p>
+            <h1 className="text-3xl font-bold text-foreground">
+              Dashboard
+            </h1>
+            <p className="text-muted-foreground mt-1">
+              Welcome back! Here's your sustainable banking overview.
+            </p>
           </div>
 
-          {/* Stats Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          {/* Top cards: Balance, Carbon Impact, Rewards */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {/* Account Balance */}
             <Card>
               <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">Account Balance</CardTitle>
+                <CardTitle className="text-sm font-medium text-muted-foreground">
+                  Account Balance
+                </CardTitle>
                 <DollarSign className="w-4 h-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">$12,458.32</div>
+                <div className="text-2xl font-bold">
+                  {balanceDisplay}
+                </div>
                 <p className="text-xs text-muted-foreground flex items-center gap-1 mt-1">
                   <ArrowUpRight className="w-3 h-3 text-primary" />
-                  <span className="text-primary">+12.5%</span> from last month
+                  <span className="text-primary">
+                    {balanceChangePct.toFixed(1)}%
+                  </span>{" "}
+                  from last month
                 </p>
               </CardContent>
             </Card>
 
+            {/* Carbon Impact */}
             <Card>
               <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">Carbon Saved</CardTitle>
+                <CardTitle className="text-sm font-medium text-muted-foreground">
+                  Carbon Impact
+                </CardTitle>
                 <Leaf className="w-4 h-4 text-primary" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">30 kg CO₂</div>
+                <div className="text-2xl font-bold">
+                  {loading
+                    ? "— kg CO₂"
+                    : `${carbonThisMonth.toFixed(2)} kg CO₂`}
+                </div>
                 <p className="text-xs text-muted-foreground flex items-center gap-1 mt-1">
                   <ArrowDownRight className="w-3 h-3 text-primary" />
-                  <span className="text-primary">-15%</span> this month
+                  <span className="text-primary">
+                    {carbonCardSubtitle}
+                  </span>
                 </p>
               </CardContent>
             </Card>
 
+            {/* Rewards Points (now using the same calculation as rewards page) */}
             <Card>
               <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">Green Score</CardTitle>
-                <TrendingUp className="w-4 h-4 text-primary" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">85/100</div>
-                <Progress value={85} className="mt-2" />
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">Rewards Points</CardTitle>
+                <CardTitle className="text-sm font-medium text-muted-foreground">
+                  Rewards Points
+                </CardTitle>
                 <Gift className="w-4 h-4 text-accent" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">2,450</div>
-                <p className="text-xs text-muted-foreground mt-1">550 points to next reward</p>
+                <div className="text-2xl font-bold">
+                  {pointsLoading ? "—" : loyaltyPoints.toLocaleString("en-SG")}
+                </div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {pointsLoading ? (
+                    "Loading..."
+                  ) : pointsToNextReward === 0 ? (
+                    "You've unlocked a reward!"
+                  ) : (
+                    `${pointsToNextReward.toLocaleString(
+                      "en-SG"
+                    )} points to next reward`
+                  )}
+                </p>
+                <Progress
+                  value={pointsLoading ? 0 : Math.min(100, (loyaltyPoints / 3000) * 100)}
+                  className="mt-2"
+                />
+                {pointsError && (
+                  <p className="text-xs text-red-600 mt-1">
+                    Error loading points: {String(pointsError.message || pointsError)}
+                  </p>
+                )}
               </CardContent>
             </Card>
           </div>
 
-          {/* Charts Row */}
+          {/* Charts row */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* Carbon Impact Trend */}
             <Card>
               <CardHeader>
                 <CardTitle>Carbon Impact Trend</CardTitle>
-                <CardDescription>Your monthly carbon footprint (kg CO₂)</CardDescription>
+                <CardDescription>
+                  Your monthly carbon footprint (kg CO₂)
+                </CardDescription>
               </CardHeader>
               <CardContent>
-                <ChartContainer
-                  config={{
-                    carbon: {
-                      label: "Carbon (kg)",
-                      color: "hsl(var(--primary))",
-                    },
-                  }}
-                  className="h-[300px]"
-                >
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={carbonData}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="month" />
-                      <YAxis />
-                      <ChartTooltip content={<ChartTooltipContent />} />
-                      <Line
-                        type="monotone"
-                        dataKey="carbon"
-                        stroke="var(--color-carbon)"
-                        strokeWidth={2}
-                        dot={{ fill: "var(--color-carbon)" }}
-                      />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </ChartContainer>
+                {loading ? (
+                  <p className="text-sm text-muted-foreground">
+                    Loading carbon impact…
+                  </p>
+                ) : carbonTrend.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    No carbon impact data available yet.
+                  </p>
+                ) : (
+                  <ChartContainer
+                    config={{
+                      carbon: {
+                        label: "Carbon (kg)",
+                        color: "hsl(var(--primary))",
+                      },
+                    }}
+                    className="h-[300px]"
+                  >
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={carbonTrend}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="month" />
+                        <YAxis />
+                        <ChartTooltip content={<ChartTooltipContent />} />
+                        <Line
+                          type="monotone"
+                          dataKey="carbon"
+                          stroke="var(--color-carbon)"
+                          strokeWidth={2}
+                          dot={{ fill: "var(--color-carbon)" }}
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </ChartContainer>
+                )}
               </CardContent>
             </Card>
 
@@ -139,28 +439,40 @@ export default function DashboardPage() {
             <Card>
               <CardHeader>
                 <CardTitle>Spending by Category</CardTitle>
-                <CardDescription>This month's expenditure breakdown</CardDescription>
+                <CardDescription>
+                  This month&apos;s expenditure breakdown
+                </CardDescription>
               </CardHeader>
               <CardContent>
-                <ChartContainer
-                  config={{
-                    amount: {
-                      label: "Amount ($)",
-                      color: "hsl(var(--chart-2))",
-                    },
-                  }}
-                  className="h-[300px]"
-                >
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={spendingData}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="category" />
-                      <YAxis />
-                      <ChartTooltip content={<ChartTooltipContent />} />
-                      <Bar dataKey="amount" fill="var(--color-amount)" radius={[8, 8, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </ChartContainer>
+                {loading ? (
+                  <p className="text-sm text-muted-foreground">
+                    Loading spending data…
+                  </p>
+                ) : spendingByCategory.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    No spending data available yet.
+                  </p>
+                ) : (
+                  <ChartContainer
+                    config={{
+                      amount: {
+                        label: "Amount ($)",
+                        color: "hsl(var(--chart-2))",
+                      },
+                    }}
+                    className="h-[300px]"
+                  >
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={spendingByCategory}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="category" />
+                        <YAxis />
+                        <ChartTooltip content={<ChartTooltipContent />} />
+                        <Bar dataKey="amount" radius={[8, 8, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </ChartContainer>
+                )}
               </CardContent>
             </Card>
           </div>
@@ -171,7 +483,9 @@ export default function DashboardPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <CardTitle>Recent Transactions</CardTitle>
-                  <CardDescription>Your latest financial activity</CardDescription>
+                  <CardDescription>
+                    Your latest financial activity
+                  </CardDescription>
                 </div>
                 <Button variant="outline" size="sm">
                   View All
@@ -179,52 +493,108 @@ export default function DashboardPage() {
               </div>
             </CardHeader>
             <CardContent>
-              <div className="space-y-4">
-                {recentTransactions.map((transaction) => (
-                  <div
-                    key={transaction.id}
-                    className="flex items-center justify-between p-4 rounded-lg border border-border hover:bg-muted/50 transition-colors"
-                  >
-                    <div className="flex items-center gap-4">
+              {loading ? (
+                <p className="text-sm text-muted-foreground">
+                  Loading transactions…
+                </p>
+              ) : recentTransactions.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  No transactions yet.
+                </p>
+              ) : (
+                <div className="space-y-4">
+                  {recentTransactions.map((tx, idx) => {
+                    const amountKey = findKey(tx, ["Amount", "TranAmount", "Amt"])
+                    const amount = parseAmount(amountKey ? tx[amountKey] : 0)
+
+                    const merchantKey = findKey(tx, [
+                      "MerchantName",
+                      "Description",
+                      "Narrative",
+                    ])
+                    const merchant =
+                      (merchantKey && tx[merchantKey]) || "Transaction"
+
+                    const categoryKey = findKey(tx, [
+                      "Category",
+                      "MerchantCategory",
+                    ])
+                    const category =
+                      (categoryKey && tx[categoryKey]) || "Other"
+
+                    const dateKey = findKey(tx, [
+                      "TransactionDate",
+                      "TranDate",
+                      "Date",
+                      "Time",
+                    ])
+                    const dateStr = dateKey ? tx[dateKey] : null
+
+                    let dateLabel = ""
+                    if (dateStr) {
+                      const d = new Date(dateStr)
+                      if (!isNaN(d.valueOf())) {
+                        dateLabel = d.toLocaleDateString("en-SG", {
+                          day: "2-digit",
+                          month: "short",
+                        })
+                      }
+                    }
+
+                    const isCredit = amount > 0
+
+                    return (
                       <div
-                        className={`w-10 h-10 rounded-full flex items-center justify-center ${
-                          transaction.amount > 0 ? "bg-primary/10" : "bg-muted"
-                        }`}
+                        key={idx}
+                        className="flex items-center justify-between p-4 rounded-lg border border-border hover:bg-muted/50 transition-colors"
                       >
-                        {transaction.amount > 0 ? (
-                          <ArrowUpRight className="w-5 h-5 text-primary" />
-                        ) : (
-                          <ArrowDownRight className="w-5 h-5 text-foreground" />
-                        )}
-                      </div>
-                      <div>
-                        <p className="font-medium text-foreground">{transaction.merchant}</p>
-                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                          <span>{transaction.category}</span>
-                          {transaction.carbon > 0 && (
-                            <>
-                              <span>•</span>
-                              <span className="flex items-center gap-1">
-                                <Leaf className="w-3 h-3" />
-                                {transaction.carbon} kg CO₂
-                              </span>
-                            </>
+                        <div className="flex items-center gap-4">
+                          <div
+                            className={`w-10 h-10 rounded-full flex items-center justify-center ${
+                              isCredit ? "bg-primary/10" : "bg-muted"
+                            }`}
+                          >
+                            {isCredit ? (
+                              <ArrowUpRight className="w-5 h-5 text-primary" />
+                            ) : (
+                              <ArrowDownRight className="w-5 h-5 text-foreground" />
+                            )}
+                          </div>
+                          <div>
+                            <p className="font-medium text-foreground">
+                              {merchant}
+                            </p>
+                            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                              <span>{category}</span>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <p
+                            className={`font-semibold ${
+                              isCredit ? "text-primary" : "text-foreground"
+                            }`}
+                          >
+                            {amount > 0 ? "+" : "-"}
+                            {Math.abs(amount).toFixed(2)}
+                          </p>
+                          {dateLabel && (
+                            <p className="text-sm text-muted-foreground">
+                              {dateLabel}
+                            </p>
                           )}
                         </div>
                       </div>
-                    </div>
-                    <div className="text-right">
-                      <p className={`font-semibold ${transaction.amount > 0 ? "text-primary" : "text-foreground"}`}>
-                        {transaction.amount > 0 ? "+" : ""}
-                        {transaction.amount.toFixed(2)}
-                      </p>
-                      <p className="text-sm text-muted-foreground">{transaction.date}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
+                    )
+                  })}
+                </div>
+              )}
             </CardContent>
           </Card>
+
+          {error && (
+            <p className="text-sm text-red-500 text-right">{error}</p>
+          )}
         </div>
       </main>
     </div>
