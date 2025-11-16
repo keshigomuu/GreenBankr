@@ -69,12 +69,11 @@ function parseAmount(value) {
   return isNaN(num) ? 0 : num;
 }
 
-// Add this helper function near the top, after your existing helper functions
+// Helper to show YYYY-MM-DD (avoids hydration issues)
 function formatDate(value) {
   if (!value) return "";
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return "";
-  // Use ISO date (YYYY-MM-DD) so SSR and client match
   return d.toISOString().split("T")[0];
 }
 
@@ -98,23 +97,21 @@ export default function DashboardPage() {
 
   const [loading, setLoading] = useState(true);
 
-  // Use the same loyalty data source as rewards page
   const {
-    points: donatedPoints, // lifetime donated points
+    points: donatedPoints,
     loading: pointsLoading,
     error: pointsError,
   } = useLoyaltyPoints(customerId);
 
   const { claims } = useMyClaims(customerId);
 
-  // Calculate current points the same way as rewards page
   const totalSpent = Array.isArray(claims)
     ? claims.reduce((s, c) => s + Number(c.pointsCost || 0), 0)
     : 0;
 
   const loyaltyPoints = Math.max((donatedPoints ?? 0) - totalSpent, 0);
 
-  // Load saved category map from localStorage
+  // Load saved category map from localStorage (same key as Accounts page)
   useEffect(() => {
     if (typeof window === "undefined") return;
     try {
@@ -127,8 +124,10 @@ export default function DashboardPage() {
     }
   }, []);
 
+  const hasAccount = !!customerId && !!accountId;
+
   useEffect(() => {
-    if (!customerId || !accountId) {
+    if (!hasAccount) {
       setLoading(false);
       setError("Please log in to view your dashboard.");
       return;
@@ -141,56 +140,107 @@ export default function DashboardPage() {
 
         console.log("🔍 Starting optimized dashboard load...");
 
-        // OPTIMIZATION 1: Load balance first (most critical)
+        // 1) Balance
         console.log("📊 Loading balance...");
         const bal = await getDepositBalance(customerId, accountId);
         setBalance(Number(bal) || 0);
         setBalanceChangePct(12.5);
 
-        // OPTIMIZATION 2: Load recent transactions only (last 30 days)
+        // 2) Recent transactions (last 30 days)
         console.log("💳 Loading recent transactions...");
         const end = new Date();
         const start = new Date();
-        start.setDate(start.getDate() - 30); // Reduced from 3 months to 30 days
+        start.setDate(start.getDate() - 30);
 
         const startDate = start.toISOString().slice(0, 10);
         const endDate = end.toISOString().slice(0, 10);
 
-        const txns = await getTransactionHistory(accountId, startDate, endDate);
+        const rawTxns = await getTransactionHistory(accountId, startDate, endDate);
 
-        // OPTIMIZATION 3: Process only first 10 transactions
-        const sortedTx = [...txns]
+        // 🔹 Pull categories just like Accounts page: from server + local map
+        const ids = rawTxns
+          .map((tx) => tx.transactionId)
+          .filter(Boolean);
+
+        let serverCategories = {};
+        try {
+          serverCategories = await getTransactionCategories(ids);
+        } catch (e) {
+          console.warn("Failed to load server categories in dashboard", e);
+        }
+
+        // 🔹 Normalize MerchantCategory the same way as Accounts page
+        const withCategories = rawTxns.map((tx) => {
+          const tid = tx.transactionId;
+          return {
+            ...tx,
+            MerchantCategory:
+              tx.MerchantCategory ||
+              tx.merchantCategory ||
+              serverCategories[tid] ||
+              categoryMap[tid] ||
+              null,
+          };
+        });
+
+        // Sort newest → oldest and only keep 10 for dashboard
+        const sortedTx = [...withCategories]
           .sort((a, b) => {
-            const dateKeyA = findKey(a, ["transactionDate", "TranDate", "Date", "Time"]);
-            const dateKeyB = findKey(b, ["transactionDate", "TranDate", "Date", "Time"]);
+            const dateKeyA = findKey(a, [
+              "transactionDate",
+              "TranDate",
+              "Date",
+              "Time",
+            ]);
+            const dateKeyB = findKey(b, [
+              "transactionDate",
+              "TranDate",
+              "Date",
+              "Time",
+            ]);
             const da = dateKeyA ? new Date(a[dateKeyA]).getTime() : 0;
             const db = dateKeyB ? new Date(b[dateKeyB]).getTime() : 0;
             return db - da;
           })
-          .slice(0, 10); // Only process 10 transactions
+          .slice(0, 10);
 
-        // OPTIMIZATION 4: Skip heavy category API call for dashboard
-        const enhancedTx = sortedTx.map((tx) => ({
-          ...tx,
-          MerchantCategory: tx.MerchantCategory || tx.merchantCategory || "Other",
-        }));
+        setRecentTransactions(sortedTx.slice(0, 6));
 
-        setRecentTransactions(enhancedTx.slice(0, 6));
-
-        // OPTIMIZATION 5: Simple spending calculation from recent transactions only
+        // 3) Spending by Category (use MerchantCategory from above)
         const spendingMap = new Map();
-        enhancedTx.forEach((tx) => {
-          const amountKey = findKey(tx, ["transactionAmount", "txnAmt", "Amount"]);
-          const amount = parseAmount(amountKey ? tx[amountKey] : 0);
-          const category = tx.MerchantCategory || "Other";
+        sortedTx.forEach((tx) => {
+          const amountKey = findKey(tx, [
+            "transactionAmount",
+            "txnAmt",
+            "Amount",
+            "TranAmount",
+            "Amt",
+          ]);
+          const rawAmount = parseAmount(amountKey ? tx[amountKey] : 0);
 
-          if (amount < 0 && category !== "Deposit" && category !== "Withdrawal" && !category.toLowerCase().includes("donation")) {
+          const isCredit =
+            tx.accountTo === accountId ||
+            String(tx.transactionType) === "200" ||
+            tx.Recieving_Acct_Id === accountId;
+
+          const signedAmount = isCredit ? rawAmount : -rawAmount;
+
+          const category =
+            tx.MerchantCategory || // normalized above
+            "Donation";
+
+          // Only ignore Deposit / Withdrawal; everything else (Donation, Food, Shopping, etc.) is spending
+          if (
+            signedAmount < 0 &&
+            category !== "Deposit" &&
+            category !== "Withdrawal"
+          ) {
             const current = spendingMap.get(category) || 0;
-            spendingMap.set(category, current + Math.abs(amount));
+            spendingMap.set(category, current + Math.abs(signedAmount));
           }
         });
 
-        let spendingArray = Array.from(spendingMap.entries())
+        const spendingArray = Array.from(spendingMap.entries())
           .sort((a, b) => b[1] - a[1])
           .slice(0, 6)
           .map(([category, amount]) => ({
@@ -198,17 +248,9 @@ export default function DashboardPage() {
             amount: Number(amount.toFixed(2)),
           }));
 
-        if (spendingArray.length === 0) {
-          spendingArray = [
-            { category: "Groceries", amount: 1.2 },
-            { category: "Shopping", amount: 5.5 },
-            { category: "Transport", amount: 3.0 },
-          ];
-        }
-
         setSpendingByCategory(spendingArray);
 
-        // OPTIMIZATION 6: Load carbon impact separately and allow it to fail
+        // 4) Carbon impact (unchanged)
         console.log("🌱 Loading carbon impact (async)...");
         getCarbonImpact(customerId)
           .then((impact) => {
@@ -216,32 +258,66 @@ export default function DashboardPage() {
             const thisYear = new Date().getFullYear();
 
             let thisMonthTotal = 0;
-            const impactTxns = impact.transactions || impact.raw?.Transactions || [];
+            const impactTxns =
+              impact.transactions || impact.raw?.Transactions || [];
 
             impactTxns.forEach((tx) => {
-              const categoryRaw = tx.MerchantCategory || tx.Category || tx.category || "";
-              const isDonation = String(categoryRaw).toLowerCase().includes("donation");
+              const categoryRaw =
+                tx.MerchantCategory || tx.Category || tx.category || "";
+              const isDonation = String(categoryRaw)
+                .toLowerCase()
+                .includes("donation");
               if (isDonation) return;
 
-              const dateKey = findKey(tx, ["TransactionDate", "TranDate", "Date"]);
+              const dateKey = findKey(tx, [
+                "TransactionDate",
+                "TranDate",
+                "Date",
+              ]);
               const dateStr = dateKey ? tx[dateKey] : null;
 
               if (dateStr) {
                 const d = new Date(dateStr);
                 if (d.getFullYear() === thisYear && d.getMonth() === thisMonth) {
-                  const carbonKey = findKey(tx, ["CarbonKg", "carbonKg", "Carbon"]);
-                  thisMonthTotal += parseAmount(carbonKey ? tx[carbonKey] : 0);
+                  const carbonKey = findKey(tx, [
+                    "CarbonKg",
+                    "carbonKg",
+                    "Carbon",
+                  ]);
+                  thisMonthTotal += parseAmount(
+                    carbonKey ? tx[carbonKey] : 0
+                  );
                 }
               }
             });
 
             setCarbonThisMonth(thisMonthTotal);
-            setCarbonChangePct(-5.2); // Placeholder
 
-            // Simple trend data
+            if (!thisMonthTotal || thisMonthTotal <= 0) {
+              setCarbonChangePct(0);
+              setCarbonTrend([]);
+              return;
+            }
+
+            const monthNames = [
+              "Jan",
+              "Feb",
+              "Mar",
+              "Apr",
+              "May",
+              "Jun",
+              "Jul",
+              "Aug",
+              "Sep",
+              "Oct",
+              "Nov",
+              "Dec",
+            ];
+            const label = monthNames[thisMonth] || "This month";
+
+            setCarbonChangePct(0);
             setCarbonTrend([
-              { month: "Oct", carbon: 15.2 },
-              { month: "Nov", carbon: thisMonthTotal || 12.8 },
+              { month: label, carbon: Number(thisMonthTotal.toFixed(2)) },
             ]);
           })
           .catch((carbonError) => {
@@ -259,17 +335,14 @@ export default function DashboardPage() {
       }
     };
 
-    // OPTIMIZATION 7: Small delay to let login settle
     const timeoutId = setTimeout(loadData, 200);
     return () => clearTimeout(timeoutId);
-  }, [customerId, accountId]); // Removed categoryMap dependency
+  }, [customerId, accountId, hasAccount, categoryMap]);
 
-  // Update formatDateTime to use your formatSGT
   const formatDateTime = (value) => {
     return formatDate(value);
   };
 
-  // Helper functions from accounts page
   const renderAmount = (tx) => {
     const amountKey = findKey(tx, [
       "transactionAmount",
@@ -292,15 +365,6 @@ export default function DashboardPage() {
     return (
       <span className={`font-semibold ${colorClass}`}>{display}</span>
     );
-  };
-
-  const getMerchantName = (tx) => {
-    const merchantKey = findKey(tx, [
-      "MerchantName",
-      "Description",
-      "Narrative",
-    ]);
-    return (merchantKey && tx[merchantKey]) || "Transaction";
   };
 
   const balanceDisplay =
@@ -336,7 +400,7 @@ export default function DashboardPage() {
             </p>
           </div>
 
-          {/* Top cards: Balance, Carbon Impact, Rewards */}
+          {/* Top cards */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {/* Account Balance */}
             <Card>
@@ -426,7 +490,7 @@ export default function DashboardPage() {
             </Card>
           </div>
 
-          {/* Charts row */}
+          {/* Charts */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* Carbon Impact Trend */}
             <Card>
@@ -455,10 +519,7 @@ export default function DashboardPage() {
                     }}
                     className="h-[300px]"
                   >
-                    <ResponsiveContainer
-                      width="100%"
-                      height="100%"
-                    >
+                    <ResponsiveContainer width="100%" height="100%">
                       <LineChart data={carbonTrend}>
                         <CartesianGrid strokeDasharray="3 3" />
                         <XAxis dataKey="month" />
@@ -509,10 +570,7 @@ export default function DashboardPage() {
                     }}
                     className="h-[300px]"
                   >
-                    <ResponsiveContainer
-                      width="100%"
-                      height="100%"
-                    >
+                    <ResponsiveContainer width="100%" height="100%">
                       <BarChart data={spendingByCategory}>
                         <CartesianGrid strokeDasharray="3 3" />
                         <XAxis dataKey="category" />
@@ -529,7 +587,7 @@ export default function DashboardPage() {
             </Card>
           </div>
 
-          {/* Recent Transactions - Updated to match accounts page style */}
+          {/* Recent Transactions */}
           <Card>
             <CardHeader>
               <div className="flex items-center justify-between">
@@ -555,16 +613,22 @@ export default function DashboardPage() {
                 </p>
               ) : (
                 <div className="space-y-1">
-                  {/* header row - 3 columns (removed merchant) */}
                   <div className="grid grid-cols-3 gap-2 text-xs font-medium text-muted-foreground border-b pb-1">
                     <span>Date</span>
                     <span className="text-right">Amount</span>
                     <span className="text-right">Category</span>
                   </div>
                   {recentTransactions.map((tx) => {
-                    const dateKey = findKey(tx, ["transactionDate", "TranDate", "Date", "Time"]);
+                    const dateKey = findKey(tx, [
+                      "transactionDate",
+                      "TranDate",
+                      "Date",
+                      "Time",
+                    ]);
                     const dateVal = dateKey ? tx[dateKey] : null;
-                    const category = tx.MerchantCategory || "Other";
+
+                    const category =
+                      tx.MerchantCategory || "Other";
 
                     return (
                       <div

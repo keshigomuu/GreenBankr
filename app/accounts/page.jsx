@@ -135,11 +135,15 @@ export default function AccountsPage() {
         const txs = await getTransactionHistory(accountId, startDate, endDate);
 
         // Sort newest → oldest
-        const sorted = [...txs].sort((a, b) => {
-          const da = new Date(a.transactionDate || 0).getTime();
-          const db = new Date(b.transactionDate || 0).getTime();
-          return db - da;
-        });
+        const onlyOutgoing = txs.filter((tx) => {
+  const from = tx.accountFrom || tx.Cust_Acct_Id || tx.FromAccount;
+  return String(from) === String(accountId);
+});
+const sorted = [...onlyOutgoing].sort((a, b) => {
+  const da = new Date(a.transactionDate || 0).getTime();
+  const db = new Date(b.transactionDate || 0).getTime();
+  return db - da;
+});
 
         // Ask our backend for known categories (if implemented)
         const ids = sorted
