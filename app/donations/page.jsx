@@ -40,6 +40,7 @@ export default function DonationsPage() {
 
   const [showPrefModal, setShowPrefModal] = useState(false);
   const [prefOrgId, setPrefOrgId] = useState("");
+  const [autoDonate, setAutoDonate] = useState(true);
 
   const [orgs, setOrgs] = useState([]);
   const [orgsError, setOrgsError] = useState("");
@@ -170,6 +171,9 @@ export default function DonationsPage() {
         "⚠️ Preference mapping failed — keeping existing dropdown selection."
       );
     }
+    
+    // Set auto-donate preference ("Yes" means auto-donate enabled)
+    setAutoDonate(pref.Preference === "Yes");
   }, [pref, orgs]);
 
   // ============================================================
@@ -206,26 +210,39 @@ export default function DonationsPage() {
   // SAVE PREFERENCE
   // ============================================================
   const onSavePreference = async () => {
-    if (!customerId || !prefOrgId) return;
+    if (!customerId) return;
+    
+    // If auto-donate is disabled, organization is not required
+    if (autoDonate && !prefOrgId) return;
 
-    // Find the selected organisation's NAME by id
-    const selectedOrg = orgs.find(
-      (o) => String(o.OrganisationId) === String(prefOrgId)
-    );
-    const orgName = selectedOrg?.Name || "";
+    // Find the selected organisation's NAME by id (only if auto-donate is enabled)
+    const orgName = autoDonate 
+      ? (orgs.find((o) => String(o.OrganisationId) === String(prefOrgId))?.Name || "")
+      : "";
 
-    await savePreference({
+    const payload = {
       customerId,
-      preference: "Yes",
-      organization: orgName,
+      preference: autoDonate ? "Yes" : "No",
       hasExisting: !!pref,
-    });
+    };
+
+    // Only include organization field if auto-donate is enabled
+    if (autoDonate) {
+      payload.organization = orgName;
+    }
+
+    await savePreference(payload);
 
     // Optimistically update dropdown and modal selection
-    setOrgId(prefOrgId);
-    setPrefOrgId(prefOrgId);
+    if (autoDonate) {
+      setOrgId(prefOrgId);
+      setPrefOrgId(prefOrgId);
+    }
 
     setShowPrefModal(false);
+    
+    // Reload the page to reflect updated preference
+    window.location.reload();
   };
 
   // ============================================================
@@ -277,6 +294,7 @@ export default function DonationsPage() {
                 setShowPrefModal(true);
                 const mapped = mapPrefNameToId(pref, orgs);
                 if (mapped) setPrefOrgId(mapped);
+                setAutoDonate(pref?.Preference === "Yes");
               }}
             >
               <Settings2 className="w-4 h-4 mr-2" />
@@ -481,9 +499,9 @@ export default function DonationsPage() {
             </CardHeader>
 
             <CardContent className="space-y-4">
-              <Label>Preferred Organisation</Label>
-
-              <Select value={prefOrgId || ""} onValueChange={setPrefOrgId}>
+              <div className="space-y-2">
+                <Label>Preferred Organisation</Label>
+                <Select value={prefOrgId || ""} onValueChange={setPrefOrgId}>
                 <SelectTrigger>
                   <SelectValue placeholder="Choose organisation" />
                 </SelectTrigger>
@@ -498,6 +516,20 @@ export default function DonationsPage() {
                   ))}
                 </SelectContent>
               </Select>
+              </div>
+
+              <div className="flex items-center space-x-2 pt-2">
+                <input
+                  type="checkbox"
+                  id="autoDonate"
+                  checked={autoDonate}
+                  onChange={(e) => setAutoDonate(e.target.checked)}
+                  className="w-4 h-4 rounded border-gray-300"
+                />
+                <label htmlFor="autoDonate" className="text-sm text-muted-foreground">
+                  Automatically donate with every transaction
+                </label>
+              </div>
 
               <div className="flex justify-end gap-3 mt-4">
                 <Button

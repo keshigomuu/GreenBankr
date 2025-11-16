@@ -47,12 +47,16 @@ export function useDonationPreference(customerId) {
 
 export async function savePreference({
   customerId,
-  preference = "Yes",
+  preference,
   organization,
   hasExisting,
 }) {
   if (!customerId) throw new Error("Missing customerId");
-  if (!organization) throw new Error("Missing organisation name");
+  
+  // Organization is only required when preference is "Yes"
+  if (preference === "Yes" && !organization) {
+    throw new Error("Missing organisation name");
+  }
 
   const endpoint = hasExisting
     ? "/api/preferences/update"
@@ -63,9 +67,13 @@ export async function savePreference({
   // 🚨 Important: send EXACTLY what OutSystems expects
   const payload = {
     customerId,
-    preference,   // e.g. "Yes"
-    organization, // e.g. "Myriad USA"
+    preference,   // e.g. "Yes" or "No"
   };
+
+  // Only include organization if preference is "Yes"
+  if (preference === "Yes" && organization) {
+    payload.organization = organization;
+  }
 
   const res = await fetch(endpoint, {
     method,
